@@ -1,0 +1,61 @@
+{
+  "education": {
+    "degree": "B.S. Computer Science",
+    "school": "University of Iowa",
+    "grad_date": "2025-08",
+    "gpa": 3.0
+  },
+  "experience": [
+    {
+      "title": "Sales Representative",
+      "domain": "Fiber internet (door-to-door)",
+      "highlights": [
+        "Pipeline and lead tracking (SalesHub CRM)",
+        "Consistently hit performance targets",
+        "Customer communication and objection handling"
+      ],
+      "note": "Candidate is intentionally transitioning away from cold-call and commission-heavy roles."
+    },
+    {
+      "title": "Delivery Driver",
+      "domain": "Customer delivery",
+      "highlights": [
+        "Customer service",
+        "Reliability",
+        "Time management"
+      ]
+    }
+  ],
+  "skills": [
+    "Python",
+    "Data Analysis",
+    "Problem Solving",
+    "Project Leadership",
+    "Analytical Thinking",
+    "Technical Troubleshooting",
+    "Communication"
+  ],
+  "target_roles": [
+    "Business Analyst",
+    "Data Analyst",
+    "Operations Analyst",
+    "Financial Analyst",
+    "Risk Analyst",
+    "Compliance Analyst",
+    "Analyst"
+  ],
+  "roles_to_avoid": [
+    "SDR",
+    "BDR",
+    "Account Executive",
+    "Commission-heavy sales",
+    "Cold-calling-focused roles"
+  ],
+  "constraints": {
+    "employment_type": "full-time",
+    "cold_calling_preference": "minimal",
+    "workplace_preference": "hybrid",
+    "location": "Chicago, IL"
+  },
+  "career_goal": "Move into an analytically oriented role with upward mobility and transferable skills; avoid being pigeonholed in sales."
+}

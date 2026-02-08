@@ -1,0 +1,14 @@
+{
+  "Chicago": {
+    "url": "https://www.linkedin.com/jobs/search/?distance=5&f_E=2&f_TPR=r86400&geoId=103112676&origin=JOB_SEARCH_PAGE_JOB_FILTER&sortBy=DD",
+    "location_label": "Chicago, IL"
+  },
+  "Salt Lake City": {
+    "url": "https://www.linkedin.com/jobs/search/?currentJobId=4235579491&distance=5&f_E=2&f_JT=F&f_TPR=r86400&geoId=103250458&origin=JOB_SEARCH_PAGE_JOB_FILTER&refresh=true&sortBy=DD",
+    "location_label": "Salt Lake City, UT"
+  },
+  "Colorado Springs": {
+    "url": "https://www.linkedin.com/jobs/search/?currentJobId=4368092853&distance=5&f_E=2&f_JT=F&f_TPR=r86400&geoId=100182490&origin=JOB_SEARCH_PAGE_JOB_FILTER&sortBy=DD",
+    "location_label": "Colorado Springs, CO"
+  }
+}

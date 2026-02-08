@@ -1,0 +1,87 @@
+{
+  "profile_version": "2026-01-31",
+  "search_filters": {
+    "location_city": "Chicago, IL",
+    "radius_miles": 10,
+    "posted_within_hours": 24,
+    "employment_type_required": [
+      "full-time"
+    ],
+    "keywords": [],
+    "exclude_keywords": []
+  },
+  "hard_constraints": {
+    "no_cold_calling": true,
+    "min_base_salary_usd": null,
+    "reject_if_comp_is_commission_only": true,
+    "reject_if_contract_or_1099": true,
+    "reject_if_comp_below_min_when_listed": true
+  },
+  "workplace_preferences": {
+    "acceptable_workplace_types": [
+      "hybrid",
+      "remote",
+      "onsite"
+    ],
+    "workplace_type_weight": {
+      "remote": 0.5,
+      "hybrid": 1,
+      "onsite": 0.6,
+      "unknown": 0.5
+    }
+  },
+  "ranking_weights": {
+    "role_fit": 0.35,
+    "comp_fit": 0.25,
+    "workplace_fit": 0.15,
+    "responsibilities_fit": 0.15,
+    "red_flags": 0.1
+  },
+  "red_flag_keywords": [
+    "cold call",
+    "cold calling",
+    "outbound dialing",
+    "high-volume outbound",
+    "door-to-door",
+    "commission only",
+    "100% commission",
+    "1099",
+    "contract"
+  ],
+  "output": {
+    "shortlist_k": 25,
+    "final_top_n": 10
+  },
+  "industry_preferences": {
+    "soft_penalize": [
+      "healthcare"
+    ]
+  },
+  "role_preferences": {
+    "soft_penalize_sales_adjacent": true,
+    "hard_block_outbound_cold_calling": false,
+    "allow_minimal_outbound": true,
+    "inbound_ok": true
+  },
+  "qualification": {
+    "signals": [
+      "skills",
+      "degree",
+      "years"
+    ],
+    "safe_vs_stretch_ratio": 0.7,
+    "min_match_score": 0.79
+  },
+  "employment": {
+    "hard_block_non_full_time": true
+  },
+  "travel": {
+    "penalty": 0
+  },
+  "tuning": {
+    "sort_thresholds": {
+      "apply_min_score": 71,
+      "review_min_score": 55
+    }
+  }
+}

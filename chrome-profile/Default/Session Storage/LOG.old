@@ -1,0 +1,15 @@
+2026/02/05-02:22:43.561 12a1c Reusing MANIFEST C:\Users\Michael\Desktop\Job Finder\chrome-profile\Default\Session Storage/MANIFEST-000001
+2026/02/05-02:22:43.561 12a1c Recovering log #27
+2026/02/05-02:22:43.563 12a1c Reusing old log C:\Users\Michael\Desktop\Job Finder\chrome-profile\Default\Session Storage/000027.log 
+2026/02/05-02:23:20.773 974 Level-0 table #31: started
+2026/02/05-02:23:20.780 974 Level-0 table #31: 24476 bytes OK
+2026/02/05-02:23:20.783 974 Delete type=0 #27
+2026/02/05-02:23:20.784 974 Compacting 4@0 + 1@1 files
+2026/02/05-02:23:20.791 974 Generated table #32@0: 1069 keys, 13487 bytes
+2026/02/05-02:23:20.791 974 Compacted 4@0 + 1@1 files => 13487 bytes
+2026/02/05-02:23:20.794 974 compacted to: files[ 0 1 1 0 0 0 0 ]
+2026/02/05-02:23:20.795 974 Delete type=2 #19
+2026/02/05-02:23:20.795 974 Delete type=2 #22
+2026/02/05-02:23:20.795 974 Delete type=2 #25
+2026/02/05-02:23:20.795 974 Delete type=2 #28
+2026/02/05-02:23:20.795 974 Delete type=2 #31
