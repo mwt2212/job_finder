@@ -1,301 +1,429 @@
 [
   {
-    "score": 27,
+    "score": 47,
+    "qualification_score": 0.5,
+    "url": "https://www.linkedin.com/jobs/view/4370466411/",
+    "title": "Office Coordinator - Thinkingbox",
+    "company": "AntiSocial",
+    "workplace": "onsite",
+    "posted": "10 minutes ago\nWithin the past 24 hours",
+    "reasons": [
+      "workplace:onsite",
+      "posted:+20",
+      "title:\\bcoordinator\\b+18"
+    ]
+  },
+  {
+    "score": 42,
     "qualification_score": 0.6,
-    "url": "https://www.linkedin.com/jobs/view/4361572899/",
-    "title": "Compliance Analyst",
-    "company": "Securitize",
+    "url": "https://www.linkedin.com/jobs/view/4370459374/",
+    "title": "GTM Operations Analyst",
+    "company": "RemoteHunter",
     "workplace": "remote",
-    "posted": "",
+    "posted": "1 hour ago\nWithin the past 24 hours",
     "reasons": [
       "workplace:remote",
+      "posted:+19",
       "title:\\banalyst\\b+20",
-      "title:\\bcompliance\\b+14"
+      "title:\\boperations\\b+10"
     ]
   },
   {
-    "score": 20,
-    "qualification_score": 0.6,
-    "url": "https://www.linkedin.com/jobs/view/4358048881/",
-    "title": "Investment Analyst",
-    "company": "IE Investment Club",
-    "workplace": "remote",
-    "posted": "13 hours ago\nWithin the past 24 hours",
+    "score": 42,
+    "qualification_score": 0.5,
+    "url": "https://www.linkedin.com/jobs/view/4370431524/",
+    "title": "Intake Coordinator",
+    "company": "Shirley Ryan AbilityLab",
+    "workplace": "onsite",
+    "posted": "5 hours ago\nWithin the past 24 hours",
     "reasons": [
-      "workplace:remote",
-      "posted:+7",
-      "title:\\banalyst\\b+20"
+      "workplace:onsite",
+      "posted:+15",
+      "title:\\bcoordinator\\b+18"
     ]
   },
   {
-    "score": 13,
+    "score": 41,
     "qualification_score": 0.6,
-    "url": "https://www.linkedin.com/jobs/view/4318716913/",
-    "title": "Portfolio Analyst",
-    "company": "DataAnnotation",
-    "workplace": "remote",
-    "posted": "",
-    "reasons": [
-      "workplace:remote",
-      "title:\\banalyst\\b+20"
-    ]
-  },
-  {
-    "score": 13,
-    "qualification_score": 0.6,
-    "url": "https://www.linkedin.com/jobs/view/4362701789/",
-    "title": "Treasury Analyst",
-    "company": "Underdog",
-    "workplace": "remote",
-    "posted": "",
-    "reasons": [
-      "workplace:remote",
-      "title:\\banalyst\\b+20"
-    ]
-  },
-  {
-    "score": 13,
-    "qualification_score": 0.6,
-    "url": "https://www.linkedin.com/jobs/view/4368770251/",
-    "title": "Financial Planning and Analyst (FP&A)",
+    "url": "https://www.linkedin.com/jobs/view/4370451519/",
+    "title": "Assoc Operations Analyst",
     "company": "Jobs via Dice",
     "workplace": "remote",
-    "posted": "",
+    "posted": "2 hours ago\nWithin the past 24 hours",
     "reasons": [
       "workplace:remote",
+      "posted:+18",
+      "title:\\banalyst\\b+20",
+      "title:\\boperations\\b+10"
+    ]
+  },
+  {
+    "score": 39,
+    "qualification_score": 0.6,
+    "url": "https://www.linkedin.com/jobs/view/4370560042/",
+    "title": "Investment Operations Analyst",
+    "company": "Daley And Associates, LLC",
+    "workplace": "onsite",
+    "posted": "Chicago, IL (On-site)",
+    "reasons": [
+      "workplace:onsite",
+      "title:\\banalyst\\b+20",
+      "title:\\boperations\\b+10"
+    ]
+  },
+  {
+    "score": 32,
+    "qualification_score": 0.6,
+    "url": "https://www.linkedin.com/jobs/view/4370439980/",
+    "title": "Support Analyst",
+    "company": "RemoteHunter",
+    "workplace": "remote",
+    "posted": "1 hour ago\nWithin the past 24 hours",
+    "reasons": [
+      "workplace:remote",
+      "posted:+19",
       "title:\\banalyst\\b+20"
     ]
   },
   {
-    "score": 7,
-    "qualification_score": 0.5,
-    "url": "https://www.linkedin.com/jobs/view/4369254823/",
-    "title": "Servicing Specialist",
-    "company": "Hometap",
+    "score": 31,
+    "qualification_score": 0.6,
+    "url": "https://www.linkedin.com/jobs/view/4370800872/",
+    "title": "Certified Cogito Analyst/PM",
+    "company": "STI",
     "workplace": "remote",
-    "posted": "12 hours ago\nWithin the past 24 hours",
+    "posted": "2 hours ago\nWithin the past 24 hours",
     "reasons": [
       "workplace:remote",
-      "posted:+8",
-      "title:\\bspecialist\\b+6"
+      "posted:+18",
+      "title:\\banalyst\\b+20"
     ]
   },
   {
-    "score": 7,
-    "qualification_score": 0.5,
-    "url": "https://www.linkedin.com/jobs/view/4368772304/",
-    "title": "Finance and Administrative Specialist",
-    "company": "RemoteHunter",
-    "workplace": "remote",
-    "posted": "12 hours ago\nWithin the past 24 hours",
+    "score": 31,
+    "qualification_score": 0.6,
+    "url": "https://www.linkedin.com/jobs/view/4370373358/",
+    "title": "IT Support Analyst",
+    "company": "Lensa",
+    "workplace": "onsite",
+    "posted": "20 hours ago\nWithin the past 24 hours",
     "reasons": [
-      "workplace:remote",
-      "posted:+8",
-      "title:\\bspecialist\\b+6"
+      "workplace:onsite",
+      "posted:+2",
+      "title:\\banalyst\\b+20"
     ]
   },
   {
-    "score": 7,
-    "qualification_score": 0.5,
-    "url": "https://www.linkedin.com/jobs/view/4369254822/",
-    "title": "Default Servicing Specialist",
-    "company": "Hometap",
-    "workplace": "remote",
-    "posted": "12 hours ago\nWithin the past 24 hours",
+    "score": 31,
+    "qualification_score": 0.6,
+    "url": "https://www.linkedin.com/jobs/view/4370363707/",
+    "title": "Inventory Control Analyst",
+    "company": "Lensa",
+    "workplace": "onsite",
+    "posted": "20 hours ago\nWithin the past 24 hours",
     "reasons": [
-      "workplace:remote",
-      "posted:+8",
-      "title:\\bspecialist\\b+6"
+      "workplace:onsite",
+      "posted:+2",
+      "title:\\banalyst\\b+20"
     ]
   },
   {
-    "score": 7,
+    "score": 28,
     "qualification_score": 0.5,
-    "url": "https://www.linkedin.com/jobs/view/4368768459/",
-    "title": "Finance and Administrative Specialist",
-    "company": "RemoteHunter",
+    "url": "https://www.linkedin.com/jobs/view/4370843895/",
+    "title": "Operations Associate",
+    "company": "TheGuarantors",
     "workplace": "remote",
-    "posted": "12 hours ago\nWithin the past 24 hours",
+    "posted": "46 minutes ago\nWithin the past 24 hours",
     "reasons": [
       "workplace:remote",
-      "posted:+8",
-      "title:\\bspecialist\\b+6"
+      "posted:+13",
+      "title:\\bassociate\\b+12",
+      "title:\\boperations\\b+10"
     ]
   },
   {
-    "score": 7,
+    "score": 24,
     "qualification_score": 0.5,
-    "url": "https://www.linkedin.com/jobs/view/4361595100/",
-    "title": "Investor Reporting Associate",
-    "company": "Valon",
+    "url": "https://www.linkedin.com/jobs/view/4370563308/",
+    "title": "Data Services Specialist",
+    "company": "Swooped",
     "workplace": "remote",
-    "posted": "21 hours ago\nWithin the past 24 hours",
+    "posted": "5 hours ago\nWithin the past 24 hours",
     "reasons": [
       "workplace:remote",
+      "posted:+15",
+      "title:\\bspecialist\\b+6",
+      "title:\\bdata\\b+10"
+    ]
+  },
+  {
+    "score": 23,
+    "qualification_score": 0.5,
+    "url": "https://www.linkedin.com/jobs/view/4362231962/",
+    "title": "Data Quality and Tooling Specialist - 61290",
+    "company": "Turing",
+    "workplace": "remote",
+    "posted": "6 hours ago\nWithin the past 24 hours",
+    "reasons": [
+      "workplace:remote",
+      "posted:+14",
+      "title:\\bspecialist\\b+6",
+      "title:\\bdata\\b+10"
+    ]
+  },
+  {
+    "score": 23,
+    "qualification_score": 0.5,
+    "url": "https://www.linkedin.com/jobs/view/4370377238/",
+    "title": "(J1) Retail Associate: Mezz Store - Wrigley Field",
+    "company": "Lensa",
+    "workplace": "onsite",
+    "posted": "20 hours ago\nWithin the past 24 hours",
+    "reasons": [
+      "workplace:onsite",
       "posted:+2",
       "title:\\bassociate\\b+12"
     ]
   },
   {
-    "score": 6,
+    "score": 22,
     "qualification_score": 0.5,
-    "url": "https://www.linkedin.com/jobs/view/4368763652/",
-    "title": "Finance Specialist - Accounting & FP&A",
-    "company": "RemoteHunter",
-    "workplace": "remote",
-    "posted": "13 hours ago\nWithin the past 24 hours",
+    "url": "https://www.linkedin.com/jobs/view/4370387167/",
+    "title": "Service Coordination Specialist",
+    "company": "Chicago Housing Authority",
+    "workplace": "hybrid",
+    "posted": "16 hours ago\nWithin the past 24 hours",
     "reasons": [
-      "workplace:remote",
-      "posted:+7",
+      "workplace:hybrid",
+      "posted:+4",
       "title:\\bspecialist\\b+6"
     ]
   },
   {
-    "score": 3,
-    "qualification_score": 0.5,
-    "url": "https://www.linkedin.com/jobs/view/4369291058/",
-    "title": "Certinia Financial Management Cloud Developer",
-    "company": "ADN Group",
+    "score": 19,
+    "qualification_score": 0.6,
+    "url": "https://www.linkedin.com/jobs/view/4370225680/",
+    "title": "Business Analyst",
+    "company": "Pinnacle Method Consulting",
     "workplace": "remote",
-    "posted": "10 hours ago\nWithin the past 24 hours",
+    "posted": "14 hours ago\nWithin the past 24 hours",
     "reasons": [
       "workplace:remote",
-      "posted:+10"
+      "posted:+6",
+      "title:\\banalyst\\b+20"
     ]
   },
   {
-    "score": 0,
+    "score": 19,
     "qualification_score": 0.5,
-    "url": "https://www.linkedin.com/jobs/view/4368760719/",
-    "title": "Financial Planning Consultant",
-    "company": "Gill Legacy Planning",
-    "workplace": "remote",
-    "posted": "13 hours ago\nWithin the past 24 hours",
+    "url": "https://www.linkedin.com/jobs/view/4370809569/",
+    "title": "Clerical Assistant",
+    "company": "Envoy Global",
+    "workplace": "onsite",
+    "posted": "2 hours ago\nWithin the past 24 hours",
     "reasons": [
-      "workplace:remote",
-      "posted:+7"
-    ]
-  },
-  {
-    "score": -1,
-    "qualification_score": 0.5,
-    "url": "https://www.linkedin.com/jobs/view/4368776135/",
-    "title": "Workday Budget & Position Management Specialist",
-    "company": "Jobs via Dice",
-    "workplace": "remote",
-    "posted": "Workday Budget & Position Management Specialist",
-    "reasons": [
-      "workplace:remote",
-      "title:\\bspecialist\\b+6"
-    ]
-  },
-  {
-    "score": -7,
-    "qualification_score": 0.5,
-    "url": "https://www.linkedin.com/jobs/view/4368764881/",
-    "title": "Investment Manager",
-    "company": "Dallas Country Club",
-    "workplace": "remote",
-    "posted": "31 minutes ago\nWithin the past 24 hours",
-    "reasons": [
-      "workplace:remote",
-      "posted:+16",
+      "workplace:onsite",
+      "posted:+18",
+      "title:\\bassistant\\b+8",
       "wrong_field:-16"
     ]
   },
   {
-    "score": -7,
+    "score": 16,
     "qualification_score": 0.5,
-    "url": "https://www.linkedin.com/jobs/view/4368970236/",
-    "title": "Strategic Finance",
-    "company": "Figma",
-    "workplace": "remote",
-    "posted": "",
-    "reasons": [
-      "workplace:remote"
-    ]
-  },
-  {
-    "score": -11,
-    "qualification_score": 0.5,
-    "url": "https://www.linkedin.com/jobs/view/4359031488/",
-    "title": "Loan Originator",
-    "company": "Dunmor",
-    "workplace": "remote",
-    "posted": "8 hours ago\nWithin the past 24 hours",
-    "reasons": [
-      "workplace:remote",
-      "posted:+12",
-      "wrong_field:-16"
-    ]
-  },
-  {
-    "score": -14,
-    "qualification_score": 0.5,
-    "url": "https://www.linkedin.com/jobs/view/4369267905/",
-    "title": "Mortgage Loan Officer",
-    "company": "Next Wave Mortgage",
+    "url": "https://www.linkedin.com/jobs/view/4310460969/",
+    "title": "AI Legal and Compliance Tutor",
+    "company": "xAI",
     "workplace": "remote",
     "posted": "11 hours ago\nWithin the past 24 hours",
     "reasons": [
       "workplace:remote",
       "posted:+9",
+      "title:\\bcompliance\\b+14"
+    ]
+  },
+  {
+    "score": 15,
+    "qualification_score": 0.5,
+    "url": "https://www.linkedin.com/jobs/view/4370455612/",
+    "title": "Field Organizer",
+    "company": "Democratic Party of Illinois",
+    "workplace": "hybrid",
+    "posted": "1 hour ago\nWithin the past 24 hours",
+    "reasons": [
+      "workplace:hybrid",
+      "posted:+19",
       "wrong_field:-16"
     ]
   },
   {
-    "score": -15,
-    "qualification_score": 0.6,
-    "url": "https://www.linkedin.com/jobs/view/4354951077/",
-    "title": "Financial Analyst Americas",
-    "company": "RTB House",
-    "workplace": "remote",
-    "posted": "22 hours ago\nWithin the past 24 hours",
+    "score": 11,
+    "qualification_score": 0.5,
+    "url": "https://www.linkedin.com/jobs/view/4363000343/",
+    "title": "Attendant - Driving",
+    "company": "SP+ (SP Plus)",
+    "workplace": "onsite",
+    "posted": "2 hours ago\nWithin the past 24 hours",
     "reasons": [
-      "workplace:remote",
-      "posted:+2",
-      "title:\\banalyst\\b+20",
+      "workplace:onsite",
+      "posted:+18",
+      "wrong_field:-16"
+    ]
+  },
+  {
+    "score": 11,
+    "qualification_score": 0.5,
+    "url": "https://www.linkedin.com/jobs/view/4370820109/",
+    "title": "Federales Fulton - Door Security",
+    "company": "Four Corners",
+    "workplace": "onsite",
+    "posted": "2 hours ago\nWithin the past 24 hours",
+    "reasons": [
+      "workplace:onsite",
+      "posted:+18",
+      "wrong_field:-16"
+    ]
+  },
+  {
+    "score": 11,
+    "qualification_score": 0.5,
+    "url": "https://www.linkedin.com/jobs/view/4370411930/",
+    "title": "Patient Care Coordinator",
+    "company": "Chicago Oculofacial Plastic Surgery",
+    "workplace": "onsite",
+    "posted": "6 hours ago\nWithin the past 24 hours",
+    "reasons": [
+      "workplace:onsite",
+      "posted:+14",
+      "title:\\bcoordinator\\b+18",
       "healthcare:-30"
     ]
   },
   {
-    "score": -18,
+    "score": 8,
     "qualification_score": 0.5,
-    "url": "https://www.linkedin.com/jobs/view/4358048406/",
-    "title": "Trader",
-    "company": "T3 Trading Group",
-    "workplace": "remote",
-    "posted": "15 hours ago\nWithin the past 24 hours",
+    "url": "https://www.linkedin.com/jobs/view/4370818139/",
+    "title": "Field Sales Coordinator - Chicago",
+    "company": "Whizz",
+    "workplace": "",
+    "posted": "2 hours ago\nWithin the past 24 hours",
     "reasons": [
-      "workplace:remote",
-      "posted:+5",
+      "workplace:unknown",
+      "posted:+18",
+      "title:\\bcoordinator\\b+18",
+      "sales_adjacent:-30"
+    ]
+  },
+  {
+    "score": 4,
+    "qualification_score": 0.5,
+    "url": "https://www.linkedin.com/jobs/view/4370858091/",
+    "title": "Material Handler",
+    "company": "Serac",
+    "workplace": "onsite",
+    "posted": "57 minutes ago\nWithin the past 24 hours",
+    "reasons": [
+      "workplace:onsite",
+      "posted:+11",
       "wrong_field:-16"
     ]
   },
   {
-    "score": -18,
+    "score": 3,
     "qualification_score": 0.5,
-    "url": "https://www.linkedin.com/jobs/view/4368744749/",
-    "title": "Loan Officer",
-    "company": "Rockstar",
-    "workplace": "remote",
-    "posted": "15 hours ago\nWithin the past 24 hours",
-    "reasons": [
-      "workplace:remote",
-      "posted:+5",
-      "wrong_field:-16"
-    ]
-  },
-  {
-    "score": -23,
-    "qualification_score": 0.5,
-    "url": "https://www.linkedin.com/jobs/view/4369053301/",
-    "title": "Liquidity Trader (Crypto)",
-    "company": "Hamington Investment Solution",
+    "url": "https://www.linkedin.com/jobs/view/4370445626/",
+    "title": "100% REMOTE: Data Testing Lead",
+    "company": "Jobs via Dice",
     "workplace": "remote",
     "posted": "",
     "reasons": [
       "workplace:remote",
+      "title:\\bdata\\b+10"
+    ]
+  },
+  {
+    "score": 3,
+    "qualification_score": 0.5,
+    "url": "https://www.linkedin.com/jobs/view/3963578342/",
+    "title": "Cashier",
+    "company": "Nando's PERi-PERi North America",
+    "workplace": "onsite",
+    "posted": "10 hours ago\nWithin the past 24 hours",
+    "reasons": [
+      "workplace:onsite",
+      "posted:+10",
+      "wrong_field:-16"
+    ]
+  },
+  {
+    "score": 1,
+    "qualification_score": 0.6,
+    "url": "https://www.linkedin.com/jobs/view/4370456250/",
+    "title": "Salesforce Business Analyst w/ Sales & Revenue Cloud",
+    "company": "Jobs via Dice",
+    "workplace": "remote",
+    "posted": "2 hours ago\nWithin the past 24 hours",
+    "reasons": [
+      "workplace:remote",
+      "posted:+18",
+      "title:\\banalyst\\b+20",
+      "sales_adjacent:-30"
+    ]
+  },
+  {
+    "score": -1,
+    "qualification_score": 0.5,
+    "url": "https://www.linkedin.com/jobs/view/4370378164/",
+    "title": "Clinic Coordinator - Hinsdale Multispecialty",
+    "company": "Lensa",
+    "workplace": "onsite",
+    "posted": "20 hours ago\nWithin the past 24 hours",
+    "reasons": [
+      "workplace:onsite",
+      "posted:+2",
+      "title:\\bcoordinator\\b+18",
+      "healthcare:-30"
+    ]
+  },
+  {
+    "score": -4,
+    "qualification_score": 0.5,
+    "url": "https://www.linkedin.com/jobs/view/4370543746/",
+    "title": "Portfolio Administrator",
+    "company": "Daley And Associates, LLC",
+    "workplace": "hybrid",
+    "posted": "Chicago, IL (Hybrid)",
+    "reasons": [
+      "workplace:hybrid",
+      "wrong_field:-16"
+    ]
+  },
+  {
+    "score": -5,
+    "qualification_score": 0.5,
+    "url": "https://www.linkedin.com/jobs/view/4370363681/",
+    "title": "Front Desk Receptionist",
+    "company": "Lensa",
+    "workplace": "onsite",
+    "posted": "20 hours ago\nWithin the past 24 hours",
+    "reasons": [
+      "workplace:onsite",
+      "posted:+2",
+      "wrong_field:-16"
+    ]
+  },
+  {
+    "score": -5,
+    "qualification_score": 0.5,
+    "url": "https://www.linkedin.com/jobs/view/4370372390/",
+    "title": "Front Office Host",
+    "company": "Lensa",
+    "workplace": "onsite",
+    "posted": "20 hours ago\nWithin the past 24 hours",
+    "reasons": [
+      "workplace:onsite",
+      "posted:+2",
       "wrong_field:-16"
     ]
   }

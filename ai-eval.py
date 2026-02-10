@@ -1,7 +1,11 @@
 import json
 import time
 from pathlib import Path
-from openai import OpenAI
+
+try:
+    from openai import OpenAI  # type: ignore
+except Exception:  # pragma: no cover - fallback for legacy SDKs
+    OpenAI = None  # type: ignore
 
 # ================== PATHS (FIXED) ==================
 BASE_DIR = Path(__file__).parent
@@ -10,7 +14,7 @@ RESUME = BASE_DIR / "resume_profile.json"
 PREFS = BASE_DIR / "preferences.json"
 OUTFILE = BASE_DIR / "tier2_scored.json"
 
-client = OpenAI()
+client = OpenAI() if OpenAI else None
 
 # ================== JSON SCHEMA (STRICT) ==================
 JSON_SCHEMA = {
@@ -63,6 +67,65 @@ def extract_output_text(resp) -> str:
         return "\n".join(parts).strip()
     except Exception:
         return ""
+
+
+def _extract_json_block(text: str) -> str:
+    if not text:
+        return ""
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return ""
+    return text[start : end + 1].strip()
+
+
+def _call_model(prompt: str, model: str) -> str:
+    # New SDK (Responses API)
+    if client and hasattr(client, "responses"):
+        resp = client.responses.create(
+            model=model,
+            input=prompt,
+            text={
+                "format": {
+                    "type": "json_schema",
+                    "name": "job_eval",
+                    "schema": JSON_SCHEMA,
+                    "strict": True,
+                }
+            },
+        )
+        return extract_output_text(resp)
+
+    # New SDK (Chat Completions)
+    if client and hasattr(client, "chat"):
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "Return only valid JSON that matches the provided schema.",
+                },
+                {"role": "user", "content": prompt + "\n\nJSON Schema:\n" + json.dumps(JSON_SCHEMA)},
+            ],
+            temperature=0,
+        )
+        return resp.choices[0].message.content or ""
+
+    # Legacy SDK (openai.ChatCompletion)
+    import openai  # type: ignore
+
+    resp = openai.ChatCompletion.create(
+        model=model,
+        messages=[
+            {
+                "role": "system",
+                "content": "Return only valid JSON that matches the provided schema.",
+            },
+            {"role": "user", "content": prompt + "\n\nJSON Schema:\n" + json.dumps(JSON_SCHEMA)},
+        ],
+        temperature=0,
+    )
+    return resp["choices"][0]["message"]["content"] or ""
 
 
 def main():
@@ -134,24 +197,17 @@ Rules:
 Return ONLY JSON that matches the schema.
 """.strip()
 
-            resp = client.responses.create(
-                model=MODEL,
-                input=prompt,
-                text={
-                    "format": {
-                        "type": "json_schema",
-                        "name": "job_eval",
-                        "schema": JSON_SCHEMA,
-                        "strict": True
-                    }
-                }
-            )
-
-            out_text = extract_output_text(resp)
+            out_text = _call_model(prompt, MODEL)
             if not out_text:
                 raise RuntimeError("Model returned empty output text; cannot parse JSON.")
 
-            eval_result = json.loads(out_text)
+            try:
+                eval_result = json.loads(out_text)
+            except json.JSONDecodeError:
+                json_block = _extract_json_block(out_text)
+                if not json_block:
+                    raise
+                eval_result = json.loads(json_block)
 
         results.append({**job, "ai_eval": eval_result})
         OUTFILE.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")

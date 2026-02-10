@@ -3,18 +3,19 @@ import subprocess
 import sys
 import threading
 import re
+import traceback
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from typing import Iterator
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from db import (
+from backend.db import (
     init_db,
     upsert_job,
     upsert_shortlist_score,
@@ -30,18 +31,26 @@ from db import (
     insert_import,
 )
 
-BASE_DIR = Path(__file__).resolve().parents[1]
+def _get_base_dir() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+BASE_DIR = _get_base_dir()
 PREFERENCES_PATH = BASE_DIR / "preferences.json"
 RULES_PATH = BASE_DIR / "shortlist_rules.json"
 SEARCHES_PATH = BASE_DIR / "searches.json"
 
-SCRIPTS = {
-    "scout": BASE_DIR / "job-scout.py",
-    "shortlist": BASE_DIR / "shortlist.py",
-    "scrape": BASE_DIR / "deep-scrape-full.py",
-    "eval": BASE_DIR / "ai-eval.py",
-    "sort": BASE_DIR / "sort-results.py",
+SCRIPT_NAMES = {
+    "scout": "job-scout.py",
+    "shortlist": "shortlist.py",
+    "scrape": "deep-scrape-full.py",
+    "eval": "ai-eval.py",
+    "sort": "sort-results.py",
 }
+
+
+def _script_path(step: str) -> Path:
+    return _get_base_dir() / SCRIPT_NAMES[step]
 
 app = FastAPI(title="Job Finder Dashboard")
 
@@ -51,6 +60,13 @@ app.add_middleware(
     allow_methods=["*"] ,
     allow_headers=["*"] ,
 )
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    response = await call_next(request)
+    print(f"{request.method} {request.url.path} -> {response.status_code}", flush=True)
+    return response
 
 RUN_STATE = {
     "running": False,
@@ -108,7 +124,23 @@ class AiEvalFeedbackIn(BaseModel):
 
 @app.on_event("startup")
 def _startup() -> None:
+    print(f"Backend loaded from {__file__}", flush=True)
     init_db()
+
+
+@app.get("/health")
+def api_health():
+    return {"ok": True, "app_file": str(Path(__file__).resolve())}
+
+
+@app.get("/debug/env")
+def api_debug_env():
+    return {
+        "app_file": str(Path(__file__).resolve()),
+        "base_dir": str(_get_base_dir()),
+        "cwd": str(Path.cwd()),
+        "scripts": {k: str(_script_path(k)) for k in SCRIPT_NAMES},
+    }
 
 
 @app.get("/jobs")
@@ -232,7 +264,11 @@ def api_run_start(payload: StartIn):
             raise HTTPException(status_code=409, detail="Another step is running")
         RUN_STATE["running"] = True
         RUN_STATE["step"] = "pipeline"
-        RUN_STATE["lines"] = [f"Starting pipeline ({payload.size})..."]
+        RUN_STATE["lines"] = [
+            f"Starting pipeline ({payload.size})...",
+            f"Backend: {Path(__file__).resolve()}",
+            f"Base dir: {_get_base_dir()}",
+        ]
         RUN_STATE["status"] = "running"
         RUN_STATE["progress"] = {"current": 0, "total": 0, "pct": 0.0, "label": "pipeline"}
 
@@ -247,9 +283,9 @@ def api_run_start(payload: StartIn):
 
 @app.post("/run/{step}")
 def api_run_step(step: str, search: Optional[str] = None, query: Optional[str] = None):
-    if step not in SCRIPTS:
+    if step not in SCRIPT_NAMES:
         raise HTTPException(status_code=400, detail="Invalid step")
-    script = SCRIPTS[step]
+    script = _script_path(step)
     if not script.exists():
         raise HTTPException(status_code=404, detail=f"Missing script: {script.name}")
 
@@ -310,7 +346,7 @@ def _run_step_thread(step: str, args: List[str]) -> None:
     try:
         proc = subprocess.Popen(
             [sys.executable, "-u", *args],
-            cwd=str(BASE_DIR),
+            cwd=str(_get_base_dir()),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -330,8 +366,11 @@ def _run_step_thread(step: str, args: List[str]) -> None:
         status = "error"
         err_line = f"Error: {exc}"
         log_lines.append(err_line)
+        tb_lines = traceback.format_exc().splitlines()
+        log_lines.extend(tb_lines)
         with RUN_STATE["lock"]:
             RUN_STATE["lines"].append(err_line)
+            RUN_STATE["lines"].extend(tb_lines)
 
     ended = datetime.utcnow().isoformat() + "Z"
     insert_run(step, status, started, ended, "\n".join(log_lines))
@@ -351,7 +390,6 @@ def _update_progress_from_line(step: str, line: str) -> None:
     if m0:
         total = int(m0.group(1))
         RUN_STATE["progress"] = {"current": 0, "total": total, "pct": 0.0, "label": step}
-        return
 
     # Generic [i/total] progress
     m = re.search(r"\[(\d+)\s*/\s*(\d+)\]", line)
@@ -360,7 +398,6 @@ def _update_progress_from_line(step: str, line: str) -> None:
         total = int(m.group(2))
         pct = (current / total) * 100.0 if total else 0.0
         RUN_STATE["progress"] = {"current": current, "total": total, "pct": pct, "label": step}
-        return
 
     # Scout: "Added X jobs | Total: Y"
     m2 = re.search(r"Total:\s*(\d+)", line)
@@ -369,18 +406,16 @@ def _update_progress_from_line(step: str, line: str) -> None:
         total = RUN_STATE["progress"].get("total", 0)
         pct = (current / total) * 100.0 if total else 0.0
         RUN_STATE["progress"] = {"current": current, "total": total, "pct": pct, "label": step}
-        return
 
     # Scout: "Reached cap of N jobs"
     m3 = re.search(r"Reached cap of\s*(\d+)", line)
     if m3:
         total = int(m3.group(1))
         RUN_STATE["progress"] = {"current": total, "total": total, "pct": 100.0, "label": step}
-        return
 
 
 def _script_args(step: str, search: Optional[str], query: Optional[str] = None) -> List[str]:
-    script = SCRIPTS[step]
+    script = _script_path(step)
     args = [str(script)]
     if step == "scout" and search:
         args.extend(["--search", search])
@@ -410,8 +445,10 @@ def _run_pipeline_thread(search: str, size: str, query: str) -> None:
     status = "ok"
     log_lines: List[str] = []
     steps = ["scout", "shortlist", "scrape", "eval", "sort"]
+    base_dir = _get_base_dir()
 
     try:
+        globals()["BASE_DIR"] = base_dir
         for step in steps:
             with RUN_STATE["lock"]:
                 RUN_STATE["step"] = step
@@ -419,7 +456,7 @@ def _run_pipeline_thread(search: str, size: str, query: str) -> None:
             args = _script_args_with_size(step, search, size, query)
             proc = subprocess.Popen(
                 [sys.executable, "-u", *args],
-                cwd=str(BASE_DIR),
+                cwd=str(base_dir),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -439,9 +476,13 @@ def _run_pipeline_thread(search: str, size: str, query: str) -> None:
             _import_for_step(step)
     except Exception as exc:
         status = "error"
-        log_lines.append(f"Error: {exc}")
+        err_line = f"Error: {exc}"
+        log_lines.append(err_line)
+        tb_lines = traceback.format_exc().splitlines()
+        log_lines.extend(tb_lines)
         with RUN_STATE["lock"]:
-            RUN_STATE["lines"].append(f"Error: {exc}")
+            RUN_STATE["lines"].append(err_line)
+            RUN_STATE["lines"].extend(tb_lines)
 
     ended = datetime.utcnow().isoformat() + "Z"
     insert_run("pipeline", status, started, ended, "\n".join(log_lines))
@@ -489,50 +530,52 @@ def _save_json(path: Path, data: Dict[str, Any]) -> None:
 
 
 def _append_tuning_log(entry: Dict[str, Any]) -> None:
-    log_path = BASE_DIR / "tuning_log.jsonl"
+    log_path = _get_base_dir() / "tuning_log.jsonl"
     entry["ts"] = datetime.utcnow().isoformat() + "Z"
     log_path.open("a", encoding="utf-8").write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
 def _import_for_step(step: str) -> None:
+    base_dir = _get_base_dir()
     if step == "scout":
-        import_metadata(BASE_DIR / "tier2_metadata.json")
+        import_metadata(base_dir / "tier2_metadata.json")
     elif step == "shortlist":
-        import_shortlist(BASE_DIR / "tier2_shortlist.json")
+        import_shortlist(base_dir / "tier2_shortlist.json")
     elif step == "scrape":
-        import_full(BASE_DIR / "tier2_full.json")
+        import_full(base_dir / "tier2_full.json")
     elif step == "eval":
-        import_scored(BASE_DIR / "tier2_scored.json")
+        import_scored(base_dir / "tier2_scored.json")
     elif step == "sort":
         import_buckets(
             {
-                "apply": BASE_DIR / "apply.json",
-                "review": BASE_DIR / "review.json",
-                "skip": BASE_DIR / "skip.json",
+                "apply": base_dir / "apply.json",
+                "review": base_dir / "review.json",
+                "skip": base_dir / "skip.json",
             }
         )
 
 
 def import_all(only_sources: Optional[List[str]] = None) -> Dict[str, Any]:
+    base_dir = _get_base_dir()
     counts: Dict[str, Any] = {}
 
     def want(name: str) -> bool:
         return not only_sources or name in only_sources
 
     if want("metadata"):
-        counts["metadata"] = import_metadata(BASE_DIR / "tier2_metadata.json")
+        counts["metadata"] = import_metadata(base_dir / "tier2_metadata.json")
     if want("shortlist"):
-        counts["shortlist"] = import_shortlist(BASE_DIR / "tier2_shortlist.json")
+        counts["shortlist"] = import_shortlist(base_dir / "tier2_shortlist.json")
     if want("full"):
-        counts["full"] = import_full(BASE_DIR / "tier2_full.json")
+        counts["full"] = import_full(base_dir / "tier2_full.json")
     if want("scored"):
-        counts["scored"] = import_scored(BASE_DIR / "tier2_scored.json")
+        counts["scored"] = import_scored(base_dir / "tier2_scored.json")
     if want("buckets"):
         counts["buckets"] = import_buckets(
             {
-                "apply": BASE_DIR / "apply.json",
-                "review": BASE_DIR / "review.json",
-                "skip": BASE_DIR / "skip.json",
+                "apply": base_dir / "apply.json",
+                "review": base_dir / "review.json",
+                "skip": base_dir / "skip.json",
             }
         )
 
@@ -616,7 +659,7 @@ def _generate_suggestions(prefs: Dict[str, Any]) -> List[Dict[str, Any]]:
     suggestions: List[Dict[str, Any]] = []
 
     # Basic heuristic: if many low-rated jobs mention healthcare, suggest adding it
-    from db import _connect
+    from backend.db import _connect
 
     healthcare_terms = ["health", "medical", "hospital", "clinic"]
 
