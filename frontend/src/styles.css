@@ -429,6 +429,134 @@ section {
   font-weight: 600;
 }
 
+.ghost {
+  margin-left: 8px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--ink);
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cover-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(0, 2fr);
+  gap: 18px;
+}
+
+.cover-meta {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: #fffdf9;
+}
+
+.mini-list {
+  display: grid;
+  gap: 8px;
+  max-height: 320px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.mini-row {
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  border: 1px solid var(--border);
+  background: #fffaf4;
+  padding: 8px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.mini-row.active {
+  background: #fff0e2;
+  border-color: #e9c6b2;
+}
+
+.mini-title {
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.mini-company {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.cover-title {
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.cover-sub {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+.cover-versions {
+  margin-top: 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.cover-versions-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.cover-version {
+  border: 1px solid var(--border);
+  background: #fffaf4;
+  padding: 8px 10px;
+  border-radius: 10px;
+  text-align: left;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.cover-version.active {
+  background: #fff0e2;
+  border-color: #e9c6b2;
+}
+
+.cover-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.cover-actions button {
+  background: var(--accent-2);
+  color: white;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.cover-actions .primary {
+  background: var(--accent);
+}
+
+.cover-model {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font: inherit;
+  background: white;
+}
+
 .pipeline .panel {
   margin-top: 0;
 }
@@ -515,6 +643,9 @@ section {
 
 @media (max-width: 980px) {
   .content {
+    grid-template-columns: 1fr;
+  }
+  .cover-layout {
     grid-template-columns: 1fr;
   }
   .row {

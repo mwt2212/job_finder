@@ -105,6 +105,16 @@ def init_db() -> None:
                 counts TEXT,
                 created_at TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS cover_letters (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id INTEGER,
+                content TEXT,
+                feedback TEXT,
+                model TEXT,
+                created_at TEXT,
+                FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE
+            );
             """
         )
         for stmt in [
@@ -410,3 +420,54 @@ def all_job_urls() -> Iterable[str]:
     with _connect() as conn:
         rows = conn.execute("SELECT url FROM jobs").fetchall()
         return [r["url"] for r in rows]
+
+
+def insert_cover_letter(job_id: int, content: str, feedback: str, model: str) -> int:
+    with _connect() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO cover_letters (job_id, content, feedback, model, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (job_id, content, feedback, model, _now()),
+        )
+        return int(cur.lastrowid)
+
+
+def update_cover_letter(cover_id: int, content: str, feedback: str) -> None:
+    with _connect() as conn:
+        conn.execute(
+            """
+            UPDATE cover_letters
+            SET content = ?, feedback = ?
+            WHERE id = ?
+            """,
+            (content, feedback, cover_id),
+        )
+
+
+def list_cover_letters(job_id: int) -> List[Dict[str, Any]]:
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, job_id, content, feedback, model, created_at
+            FROM cover_letters
+            WHERE job_id = ?
+            ORDER BY created_at DESC
+            """,
+            (job_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_cover_letter(cover_id: int) -> Optional[Dict[str, Any]]:
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT id, job_id, content, feedback, model, created_at
+            FROM cover_letters
+            WHERE id = ?
+            """,
+            (cover_id,),
+        ).fetchone()
+        return dict(row) if row else None

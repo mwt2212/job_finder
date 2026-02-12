@@ -172,6 +172,7 @@ function badgeClass(group, value) {
 export default function App() {
   const [tab, setTab] = useState("jobs");
   const [jobs, setJobs] = useState([]);
+  const [coverJobs, setCoverJobs] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [selected, setSelected] = useState(null);
   const [detailDraft, setDetailDraft] = useState({
@@ -202,9 +203,19 @@ export default function App() {
   const logCursorRef = useRef(0);
   const logRef = useRef(null);
   const [detailSaved, setDetailSaved] = useState("");
+  const [coverJobId, setCoverJobId] = useState(null);
+  const [coverJob, setCoverJob] = useState(null);
+  const [coverLetters, setCoverLetters] = useState([]);
+  const [coverSelectedId, setCoverSelectedId] = useState(null);
+  const [coverDraft, setCoverDraft] = useState({ content: "", feedback: "" });
+  const [coverStatus, setCoverStatus] = useState("");
+  const [coverModel, setCoverModel] = useState("gpt-4.1");
+  const [coverSearch, setCoverSearch] = useState("");
+  const COVER_MODELS = ["gpt-5.1", "gpt-5", "gpt-4.1"];
 
   useEffect(() => {
     fetchJobs();
+    fetchCoverJobs();
     fetchSettings();
     fetchSearches();
   }, []);
@@ -262,6 +273,30 @@ export default function App() {
     }
   }, [selectedId]);
 
+  useEffect(() => {
+    if (!coverJobId) {
+      setCoverJob(null);
+      setCoverLetters([]);
+      setCoverSelectedId(null);
+      return;
+    }
+    fetch(`${API}/jobs/${coverJobId}`)
+      .then((r) => r.json())
+      .then((data) => setCoverJob(data));
+    fetchCoverLetters(coverJobId);
+  }, [coverJobId]);
+
+  useEffect(() => {
+    if (!coverSelectedId) {
+      setCoverDraft({ content: "", feedback: "" });
+      return;
+    }
+    const found = coverLetters.find((c) => c.id === coverSelectedId);
+    if (found) {
+      setCoverDraft({ content: found.content || "", feedback: found.feedback || "" });
+    }
+  }, [coverSelectedId, coverLetters]);
+
   const fetchJobs = () => {
     const params = new URLSearchParams();
     Object.entries(filters).forEach(([k, v]) => {
@@ -270,6 +305,26 @@ export default function App() {
     fetch(`${API}/jobs?${params.toString()}`)
       .then((r) => r.json())
       .then(setJobs);
+  };
+
+  const fetchCoverJobs = () => {
+    fetch(`${API}/jobs`)
+      .then((r) => r.json())
+      .then(setCoverJobs)
+      .catch(() => {});
+  };
+
+  const fetchCoverLetters = (jobId) => {
+    fetch(`${API}/cover-letters/${jobId}`)
+      .then((r) => r.json())
+      .then((data) => {
+        const items = data.items || [];
+        setCoverLetters(items);
+        if (items.length && !coverSelectedId) {
+          setCoverSelectedId(items[0].id);
+        }
+      })
+      .catch(() => {});
   };
 
   const fetchSettings = () => {
@@ -506,6 +561,50 @@ export default function App() {
     });
   };
 
+  const generateCoverLetter = () => {
+    if (!coverJobId) return;
+    setCoverStatus("Generating...");
+    fetch(`${API}/cover-letters/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_id: coverJobId, feedback: coverDraft.feedback, model: coverModel })
+    })
+      .then(async (r) => {
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok || data.ok === false) {
+          throw new Error(data.detail || "Failed");
+        }
+        setCoverStatus("Saved");
+        setTimeout(() => setCoverStatus(""), 1500);
+        fetchCoverLetters(coverJobId);
+        if (data.id) setCoverSelectedId(data.id);
+      })
+      .catch((err) => {
+        setCoverStatus(`Error: ${err.message || "Failed"}`);
+      });
+  };
+
+  const saveCoverLetter = () => {
+    if (!coverSelectedId) return;
+    setCoverStatus("Saving...");
+    fetch(`${API}/cover-letters/save`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: coverSelectedId, content: coverDraft.content, feedback: coverDraft.feedback })
+    })
+      .then(() => {
+        setCoverStatus("Saved");
+        setTimeout(() => setCoverStatus(""), 1500);
+        fetchCoverLetters(coverJobId);
+      })
+      .catch(() => setCoverStatus("Error"));
+  };
+
+  const exportCoverLetter = (format) => {
+    if (!coverSelectedId) return;
+    window.open(`${API}/cover-letters/export/${coverSelectedId}?format=${format}`, "_blank");
+  };
+
   return (
     <div className="app">
       <header className="topbar">
@@ -517,6 +616,7 @@ export default function App() {
           <button className={classNames(tab === "jobs" && "active")} onClick={() => setTab("jobs")}>Jobs</button>
           <button className={classNames(tab === "settings" && "active")} onClick={() => setTab("settings")}>Settings</button>
           <button className={classNames(tab === "pipeline" && "active")} onClick={() => setTab("pipeline")}>Pipeline</button>
+          <button className={classNames(tab === "cover" && "active")} onClick={() => setTab("cover")}>Cover Letters</button>
         </div>
       </header>
 
@@ -625,6 +725,16 @@ export default function App() {
                     <span>Score: {selected.fit_score ?? selected.shortlist_score ?? "n/a"}</span>
                     <span>Bucket: {selected.bucket || ""}</span>
                     <a href={selected.url} target="_blank" rel="noreferrer">Open listing</a>
+                    <button
+                      className="ghost"
+                      onClick={() => {
+                        setCoverJobId(selected.id);
+                        setCoverSelectedId(null);
+                        setTab("cover");
+                      }}
+                    >
+                      Cover letter
+                    </button>
                   </div>
 
                   <div className="panel">
@@ -1150,6 +1260,122 @@ export default function App() {
         </section>
       )}
 
+      {tab === "cover" && (
+        <section className="cover">
+          <div className="cover-layout">
+            <div className="cover-list">
+              <div className="panel">
+                <h2>Cover Letters</h2>
+                <div className="field">
+                  <label>Search jobs</label>
+                  <input
+                    value={coverSearch}
+                    onChange={(e) => setCoverSearch(e.target.value)}
+                    placeholder="Title or company"
+                  />
+                </div>
+                <div className="mini-list">
+                  {coverJobs
+                    .filter((job) => {
+                      if (!coverSearch) return true;
+                      const q = coverSearch.toLowerCase();
+                      return (
+                        (job.title || "").toLowerCase().includes(q) ||
+                        (job.company || "").toLowerCase().includes(q)
+                      );
+                    })
+                    .map((job) => (
+                    <button
+                      key={job.id}
+                      className={classNames("mini-row", coverJobId === job.id && "active")}
+                      onClick={() => {
+                        setCoverJobId(job.id);
+                        setCoverSelectedId(null);
+                      }}
+                    >
+                      <span className="mini-title">{job.title}</span>
+                      <span className="mini-company">{job.company}</span>
+                    </button>
+                  ))}
+                </div>
+                {coverJob && (
+                  <div className="cover-meta">
+                    <div className="cover-title">{coverJob.title}</div>
+                    <div className="cover-sub">
+                      {coverJob.company} · {coverJob.location} · {coverJob.workplace || "unknown"}
+                    </div>
+                  </div>
+                )}
+                <div className="cover-versions">
+                  <div className="cover-versions-label">Versions</div>
+                  {coverLetters.length === 0 && <div className="empty">No cover letters yet.</div>}
+                  {coverLetters.map((c) => (
+                    <button
+                      key={c.id}
+                      className={classNames("cover-version", coverSelectedId === c.id && "active")}
+                      onClick={() => setCoverSelectedId(c.id)}
+                    >
+                      {new Date(c.created_at).toLocaleString()} · {c.model || "model"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="cover-editor">
+              <div className="panel">
+                <div className="cover-actions">
+                  <button className="primary" onClick={generateCoverLetter} disabled={!coverJobId}>
+                    Generate new
+                  </button>
+                  {COVER_MODELS.length > 1 && (
+                    <select
+                      className="cover-model"
+                      value={coverModel}
+                      onChange={(e) => setCoverModel(e.target.value)}
+                    >
+                      {COVER_MODELS.map((m) => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                    </select>
+                  )}
+                  <button onClick={saveCoverLetter} disabled={!coverSelectedId}>
+                    Save edits
+                  </button>
+                  <button onClick={() => exportCoverLetter("docx")} disabled={!coverSelectedId}>Export DOCX</button>
+                  <button onClick={() => exportCoverLetter("pdf")} disabled={!coverSelectedId}>Export PDF</button>
+                  <button onClick={() => exportCoverLetter("txt")} disabled={!coverSelectedId}>Export TXT</button>
+                  <button
+                    onClick={() => navigator.clipboard.writeText(coverDraft.content || "")}
+                    disabled={!coverSelectedId}
+                  >
+                    Copy
+                  </button>
+                </div>
+                {coverStatus && <div className="saved">{coverStatus}</div>}
+                <div className="field">
+                  <label>Feedback to adjust the next version</label>
+                  <textarea
+                    rows="3"
+                    value={coverDraft.feedback}
+                    onChange={(e) => setCoverDraft({ ...coverDraft, feedback: e.target.value })}
+                    placeholder="e.g., emphasize analytics more, soften sales background, mention FastAPI project"
+                  />
+                </div>
+                <div className="field">
+                  <label>Cover letter</label>
+                  <textarea
+                    rows="16"
+                    value={coverDraft.content}
+                    onChange={(e) => setCoverDraft({ ...coverDraft, content: e.target.value })}
+                    placeholder="Generate a cover letter to get started."
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
       {tab === "pipeline" && (
         <section className="pipeline">
           <div className="panel">
@@ -1182,7 +1408,7 @@ export default function App() {
               Start
             </button>
             <div className="pipeline-buttons">
-              {["scout", "shortlist", "scrape", "eval", "sort"].map((step) => (
+              {["scout", "shortlist", "scrape", "eval"].map((step) => (
                 <button key={step} onClick={() => runStep(step)} disabled={running}>
                   {running && activeStep === step ? `${step}…` : step}
                 </button>

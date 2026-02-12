@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -29,7 +29,16 @@ from backend.db import (
     get_job,
     insert_run,
     insert_import,
+    insert_cover_letter,
+    update_cover_letter,
+    list_cover_letters,
+    get_cover_letter,
 )
+
+try:
+    from openai import OpenAI  # type: ignore
+except Exception:
+    OpenAI = None  # type: ignore
 
 def _get_base_dir() -> Path:
     return Path(__file__).resolve().parents[1]
@@ -47,6 +56,9 @@ SCRIPT_NAMES = {
     "eval": "ai-eval.py",
     "sort": "sort-results.py",
 }
+
+COVER_LETTER_MODEL = "gpt-4.1"
+EXPORT_DIR = _get_base_dir() / "cover_letters"
 
 
 def _script_path(step: str) -> Path:
@@ -122,6 +134,18 @@ class AiEvalFeedbackIn(BaseModel):
     reasoning_quality: int  # 1-5
 
 
+class CoverLetterGenerateIn(BaseModel):
+    job_id: int
+    feedback: Optional[str] = ""
+    model: Optional[str] = None
+
+
+class CoverLetterSaveIn(BaseModel):
+    id: int
+    content: str
+    feedback: Optional[str] = ""
+
+
 @app.on_event("startup")
 def _startup() -> None:
     print(f"Backend loaded from {__file__}", flush=True)
@@ -141,6 +165,71 @@ def api_debug_env():
         "cwd": str(Path.cwd()),
         "scripts": {k: str(_script_path(k)) for k in SCRIPT_NAMES},
     }
+
+
+def _call_model(prompt: str, model: str) -> str:
+    if OpenAI:
+        client = OpenAI()
+        if hasattr(client, "responses"):
+            resp = client.responses.create(model=model, input=prompt)
+            text = getattr(resp, "output_text", "") or ""
+            if text:
+                return text
+        if hasattr(client, "chat"):
+            resp = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": "You write concise, professional cover letters."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.4,
+            )
+            return resp.choices[0].message.content or ""
+
+    import openai  # type: ignore
+    resp = openai.ChatCompletion.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": "You write concise, professional cover letters."},
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0.4,
+    )
+    return resp["choices"][0]["message"]["content"] or ""
+
+
+def _cover_letter_prompt(job: Dict[str, Any], resume: Dict[str, Any], feedback: str) -> str:
+    feedback_line = f"\nFeedback from candidate to adjust tone/content:\n{feedback}\n" if feedback else ""
+    return f"""
+Write a short, 3-paragraph cover letter tailored to this role.
+
+Constraints:
+- Keep it concise (3 short paragraphs).
+- Highlight transferable skills, avoid sales-heavy emphasis.
+- Only emphasize experience/skills that are reasonably applicable to this role; do not stretch.
+- If there are gaps, briefly soften them with a positive, forward-looking sentence (without exaggeration).
+- Keep the tone human and natural; no filler or generic fluff.
+- The candidate has already graduated (August 2025). Do not say "graduating" or imply they are still in school.
+- Be less verbose and avoid em dashes entirely.
+- Use a predictable 3-paragraph structure:
+  1) Opening: role interest + quick fit hook.
+  2) Middle: 2-3 concrete, relevant strengths tied to the job.
+  3) Closing: gratitude + interest in next steps.
+- Always include a brief thank-you in the closing.
+
+Candidate profile:
+{json.dumps(resume, ensure_ascii=False)}
+
+Job:
+Title: {job.get('title','')}
+Company: {job.get('company','')}
+Location: {job.get('location','')}
+Workplace: {job.get('workplace','')}
+Description:
+{job.get('description','') or job.get('raw_card_text','')}
+{feedback_line}
+Return only the cover letter text.
+""".strip()
 
 
 @app.get("/jobs")
@@ -228,6 +317,83 @@ def api_get_settings():
     prefs = _load_json(PREFERENCES_PATH)
     rules = _load_json(RULES_PATH)
     return {"preferences": prefs, "rules": rules}
+
+
+@app.get("/cover-letters/{job_id}")
+def api_cover_letters(job_id: int):
+    return {"items": list_cover_letters(job_id)}
+
+
+@app.post("/cover-letters/generate")
+def api_cover_letter_generate(payload: CoverLetterGenerateIn):
+    job = get_job(payload.job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    resume = _load_json(_get_base_dir() / "resume_profile.json")
+    prompt = _cover_letter_prompt(job, resume, payload.feedback or "")
+    model = (payload.model or COVER_LETTER_MODEL).strip() or COVER_LETTER_MODEL
+    try:
+        text = _call_model(prompt, model).strip()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Cover letter generation failed: {exc}")
+    if not text:
+        raise HTTPException(status_code=500, detail="Model returned empty cover letter.")
+    cover_id = insert_cover_letter(payload.job_id, text, payload.feedback or "", model)
+    return {"ok": True, "id": cover_id}
+
+
+@app.post("/cover-letters/save")
+def api_cover_letter_save(payload: CoverLetterSaveIn):
+    existing = get_cover_letter(payload.id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Cover letter not found")
+    update_cover_letter(payload.id, payload.content, payload.feedback or "")
+    return {"ok": True}
+
+
+@app.get("/cover-letters/export/{cover_id}")
+def api_cover_letter_export(cover_id: int, format: str = "txt"):
+    letter = get_cover_letter(cover_id)
+    if not letter:
+        raise HTTPException(status_code=404, detail="Cover letter not found")
+    EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+    safe_id = int(letter["id"])
+    if format == "txt":
+        path = EXPORT_DIR / f"cover_letter_{safe_id}.txt"
+        path.write_text(letter["content"], encoding="utf-8")
+        return FileResponse(path, media_type="text/plain", filename=path.name)
+
+    if format == "docx":
+        try:
+            from docx import Document  # type: ignore
+        except Exception:
+            raise HTTPException(status_code=500, detail="python-docx not installed")
+        doc = Document()
+        for para in letter["content"].split("\n"):
+            if para.strip():
+                doc.add_paragraph(para.strip())
+        path = EXPORT_DIR / f"cover_letter_{safe_id}.docx"
+        doc.save(path)
+        return FileResponse(path, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", filename=path.name)
+
+    if format == "pdf":
+        try:
+            from fpdf import FPDF  # type: ignore
+        except Exception:
+            raise HTTPException(status_code=500, detail="fpdf2 not installed")
+        pdf = FPDF()
+        pdf.set_auto_page_break(auto=True, margin=15)
+        pdf.add_page()
+        pdf.set_font("Helvetica", size=12)
+        for para in letter["content"].split("\n"):
+            if para.strip():
+                pdf.multi_cell(0, 6, para.strip())
+                pdf.ln(2)
+        path = EXPORT_DIR / f"cover_letter_{safe_id}.pdf"
+        pdf.output(str(path))
+        return FileResponse(path, media_type="application/pdf", filename=path.name)
+
+    raise HTTPException(status_code=400, detail="Unsupported format")
 
 
 @app.get("/searches")
@@ -444,7 +610,7 @@ def _run_pipeline_thread(search: str, size: str, query: str) -> None:
     started = datetime.utcnow().isoformat() + "Z"
     status = "ok"
     log_lines: List[str] = []
-    steps = ["scout", "shortlist", "scrape", "eval", "sort"]
+    steps = ["scout", "shortlist", "scrape", "eval"]
     base_dir = _get_base_dir()
 
     try:
@@ -537,6 +703,8 @@ def _append_tuning_log(entry: Dict[str, Any]) -> None:
 
 def _import_for_step(step: str) -> None:
     base_dir = _get_base_dir()
+    with RUN_STATE["lock"]:
+        RUN_STATE["lines"].append(f"Importing {step} results into SQLite...")
     if step == "scout":
         import_metadata(base_dir / "tier2_metadata.json")
     elif step == "shortlist":
@@ -589,9 +757,13 @@ def import_metadata(path: Path) -> int:
     data = json.loads(path.read_text(encoding="utf-8"))
     scraped_at = datetime.utcnow().isoformat() + "Z"
     count = 0
+    total = len(data)
     for job in data:
         upsert_job({**job, "scraped_at": scraped_at})
         count += 1
+        if count == 1 or count % 50 == 0 or count == total:
+            with RUN_STATE["lock"]:
+                RUN_STATE["lines"].append(f"Importing scout -> SQLite: {count}/{total}")
     return count
 
 
@@ -600,6 +772,7 @@ def import_shortlist(path: Path) -> int:
         return 0
     data = json.loads(path.read_text(encoding="utf-8"))
     count = 0
+    total = len(data)
     for job in data:
         job_id = upsert_job(job)
         if job_id <= 0:
@@ -609,6 +782,9 @@ def import_shortlist(path: Path) -> int:
         qualification_score = float(job.get("qualification_score", 0) or 0)
         upsert_shortlist_score(job_id, score, reasons, qualification_score)
         count += 1
+        if count == 1 or count % 25 == 0 or count == total:
+            with RUN_STATE["lock"]:
+                RUN_STATE["lines"].append(f"Importing shortlist -> SQLite: {count}/{total}")
     return count
 
 
@@ -617,9 +793,13 @@ def import_full(path: Path) -> int:
         return 0
     data = json.loads(path.read_text(encoding="utf-8"))
     count = 0
+    total = len(data)
     for job in data:
         upsert_job(job)
         count += 1
+        if count == 1 or count % 25 == 0 or count == total:
+            with RUN_STATE["lock"]:
+                RUN_STATE["lines"].append(f"Importing full -> SQLite: {count}/{total}")
     return count
 
 
@@ -628,6 +808,7 @@ def import_scored(path: Path) -> int:
         return 0
     data = json.loads(path.read_text(encoding="utf-8"))
     count = 0
+    total = len(data)
     for job in data:
         job_id = upsert_job(job)
         if job_id <= 0:
@@ -635,6 +816,9 @@ def import_scored(path: Path) -> int:
         eval_json = job.get("ai_eval") or {}
         upsert_ai_eval(job_id, eval_json, model="gpt-4.1-mini")
         count += 1
+        if count == 1 or count % 25 == 0 or count == total:
+            with RUN_STATE["lock"]:
+                RUN_STATE["lines"].append(f"Importing eval -> SQLite: {count}/{total}")
     return count
 
 

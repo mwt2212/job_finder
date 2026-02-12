@@ -1,6 +1,6 @@
 {
   "education": {
-    "degree": "B.S. Computer Science",
+    "degree": "B.A. Computer Science",
     "school": "University of Iowa",
     "grad_date": "2025-08",
     "gpa": 3.0
@@ -10,30 +10,60 @@
       "title": "Sales Representative",
       "domain": "Fiber internet (door-to-door)",
       "highlights": [
-        "Pipeline and lead tracking (SalesHub CRM)",
-        "Consistently hit performance targets",
-        "Customer communication and objection handling"
+        "Generated new residential customers through direct door-to-door sales",
+        "Tracked leads and performance in SalesHub",
+        "Met or exceeded sales targets"
       ],
       "note": "Candidate is intentionally transitioning away from cold-call and commission-heavy roles."
     },
     {
-      "title": "Delivery Driver",
-      "domain": "Customer delivery",
+      "title": "Groundskeeper & General Contractor",
+      "domain": "Property maintenance and contracting",
       "highlights": [
-        "Customer service",
-        "Reliability",
-        "Time management"
+        "Groundskeeping and general contracting work for apartment complexes",
+        "Summer employment during college",
+        "Hands-on maintenance and upkeep"
+      ]
+    },
+    {
+      "title": "Philanthropy Chair",
+      "domain": "Fraternity leadership and fundraising",
+      "highlights": [
+        "Organized and led fundraising initiatives",
+        "Coordinated volunteer events and partnerships",
+        "Managed small teams and event logistics"
+      ]
+    },
+    {
+      "title": "Independent Learning",
+      "domain": "Software projects and automation",
+      "highlights": [
+        "Built applications with Python, SQLite, and FastAPI",
+        "Created a job board scraping tool with evaluation and sorting",
+        "Hands-on automation and data workflows"
       ]
     }
   ],
   "skills": [
     "Python",
+    "SQL",
     "Data Analysis",
-    "Problem Solving",
+    "Automation",
+    "FastAPI",
+    "SQLite",
+    "Playwright",
+    "React",
+    "JavaScript",
+    "npm",
+    "pytest",
+    "GitHub",
+    "Java",
+    "Technical Support",
     "Project Leadership",
-    "Analytical Thinking",
-    "Technical Troubleshooting",
-    "Communication"
+    "Problem Solving",
+    "Communication",
+    "Research",
+    "Microsoft Office"
   ],
   "target_roles": [
     "Business Analyst",
@@ -42,6 +72,17 @@
     "Financial Analyst",
     "Risk Analyst",
     "Compliance Analyst",
+    "Fraud Analyst",
+    "Financial Reporting Analyst",
+    "Pricing Analyst",
+    "Data Reporting Analyst",
+    "Workforce Analyst",
+    "Customer Insights Analyst",
+    "Operations Coordinator",
+    "Project Coordinator",
+    "Program Coordinator",
+    "Compliance Coordinator",
+    "Compliance Associate",
     "Analyst"
   ],
   "roles_to_avoid": [
@@ -55,7 +96,7 @@
     "employment_type": "full-time",
     "cold_calling_preference": "minimal",
     "workplace_preference": "hybrid",
-    "location": "Chicago, IL"
+    "location": "West Des Moines, IA"
   },
   "career_goal": "Move into an analytically oriented role with upward mobility and transferable skills; avoid being pigeonholed in sales."
 }
