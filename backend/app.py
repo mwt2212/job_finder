@@ -4,6 +4,7 @@ import sys
 import threading
 import re
 import traceback
+import uuid
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from typing import Iterator
@@ -48,6 +49,7 @@ BASE_DIR = _get_base_dir()
 PREFERENCES_PATH = BASE_DIR / "preferences.json"
 RULES_PATH = BASE_DIR / "shortlist_rules.json"
 SEARCHES_PATH = BASE_DIR / "searches.json"
+TEMPLATES_PATH = BASE_DIR / "cover_letter_templates.json"
 
 SCRIPT_NAMES = {
     "scout": "job-scout.py",
@@ -90,9 +92,9 @@ RUN_STATE = {
 }
 
 SIZE_PRESETS = {
-    "Large": {"max_results": 1000, "shortlist_k": 120, "final_top": 25},
-    "Medium": {"max_results": 500, "shortlist_k": 60, "final_top": 10},
-    "Small": {"max_results": 100, "shortlist_k": 30, "final_top": 5},
+    "Large": {"max_results": 1000, "shortlist_k": 120, "final_top": 50},
+    "Medium": {"max_results": 500, "shortlist_k": 60, "final_top": 20},
+    "Small": {"max_results": 100, "shortlist_k": 30, "final_top": 10},
 }
 
 
@@ -138,12 +140,19 @@ class CoverLetterGenerateIn(BaseModel):
     job_id: int
     feedback: Optional[str] = ""
     model: Optional[str] = None
+    template_id: Optional[str] = None
+    draft: Optional[str] = None
+    locked_indices: Optional[List[int]] = None
 
 
 class CoverLetterSaveIn(BaseModel):
     id: int
     content: str
     feedback: Optional[str] = ""
+
+
+class CoverLetterTemplateIn(BaseModel):
+    text: str
 
 
 @app.on_event("startup")
@@ -230,6 +239,182 @@ Description:
 {feedback_line}
 Return only the cover letter text.
 """.strip()
+
+
+DATE_RE = re.compile(
+    r"^(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4}$",
+    re.IGNORECASE,
+)
+GREETING_RE = re.compile(r"^dear\b", re.IGNORECASE)
+SIGNATURE_RE = re.compile(r"^(sincerely|best|regards|respectfully|yours)\b", re.IGNORECASE)
+
+
+def _current_date_str() -> str:
+    now = datetime.now(ZoneInfo("America/Chicago"))
+    return f"{now.strftime('%B')} {now.day}, {now.year}"
+
+
+def _split_blocks(text: str) -> List[str]:
+    if not text:
+        return []
+    blocks = re.split(r"\n\s*\n+", text)
+    return [b.strip() for b in blocks if b.strip()]
+
+
+def _split_cover_sections(text: str) -> Dict[str, Any]:
+    blocks = _split_blocks(text)
+    greeting_idx = None
+    signature_idx = None
+    for i, block in enumerate(blocks):
+        first_line = (block.splitlines()[0] if block.splitlines() else "").strip()
+        if greeting_idx is None and GREETING_RE.match(first_line or ""):
+            greeting_idx = i
+        if signature_idx is None and SIGNATURE_RE.match(first_line or ""):
+            signature_idx = i
+
+    if greeting_idx is not None and signature_idx is not None and signature_idx < greeting_idx:
+        signature_idx = None
+
+    header = blocks[:greeting_idx] if greeting_idx is not None else []
+    greeting = blocks[greeting_idx] if greeting_idx is not None else ""
+    body_start = greeting_idx + 1 if greeting_idx is not None else 0
+    body_end = signature_idx if signature_idx is not None else len(blocks)
+    body = blocks[body_start:body_end]
+    signature = blocks[signature_idx:] if signature_idx is not None else []
+    return {"header": header, "greeting": greeting, "body": body, "signature": signature}
+
+
+def _apply_date_and_company_to_header(
+    blocks: List[str],
+    ensure_date: bool,
+    company: str,
+) -> List[str]:
+    if not blocks and not ensure_date:
+        return []
+    updated: List[str] = []
+    replaced_date = False
+    for block in blocks:
+        lines = block.splitlines()
+        new_lines = []
+        for line in lines:
+            stripped = line.strip()
+            if DATE_RE.match(stripped):
+                new_lines.append(_current_date_str())
+                replaced_date = True
+            elif company and stripped.lower() == "ruan":
+                new_lines.append(company)
+            else:
+                new_lines.append(line)
+        updated_block = "\n".join(new_lines).strip()
+        if updated_block:
+            updated.append(updated_block)
+    if ensure_date and not replaced_date:
+        updated = [_current_date_str(), *updated] if updated else [_current_date_str()]
+    return updated
+
+
+def _assemble_cover_letter(
+    sections: Dict[str, Any],
+    body_paragraphs: List[str],
+    ensure_date: bool,
+    company: str,
+) -> str:
+    header = _apply_date_and_company_to_header(sections.get("header", []), ensure_date, company)
+    greeting = sections.get("greeting") or ""
+    signature = sections.get("signature") or []
+
+    parts: List[str] = []
+    parts.extend([h for h in header if h.strip()])
+    if greeting.strip():
+        parts.append(greeting.strip())
+    parts.extend([p.strip() for p in body_paragraphs if str(p).strip()])
+    parts.extend([s for s in signature if str(s).strip()])
+    return "\n\n".join(parts).strip()
+
+
+def _parse_model_paragraphs(text: str) -> List[str]:
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+        cleaned = cleaned.strip()
+    try:
+        data = json.loads(cleaned)
+        paragraphs = data.get("paragraphs")
+        if isinstance(paragraphs, list):
+            return [str(p).strip() for p in paragraphs if str(p).strip()]
+    except Exception:
+        pass
+    return _split_blocks(text)
+
+
+def _cover_letter_prompt_locked(
+    job: Dict[str, Any],
+    resume: Dict[str, Any],
+    feedback: str,
+    body_seeds: List[str],
+    locked_map: Dict[int, str],
+) -> str:
+    feedback_line = f"\nFeedback from candidate to adjust tone/content:\n{feedback}\n" if feedback else ""
+    locked_indices = sorted(locked_map.keys())
+    title = job.get("title", "") or ""
+    short_title = re.split(r"\s*[,/|–-]\s*", title)[0] if title else ""
+    return f"""
+Write the body of a cover letter with exactly {len(body_seeds)} paragraphs.
+
+Locked paragraph indices (0-based): {json.dumps(locked_indices)}.
+Seed paragraphs (0-based array): {json.dumps(body_seeds, ensure_ascii=False)}.
+Locked paragraph text (index -> paragraph): {json.dumps(locked_map, ensure_ascii=False)}.
+
+Rules:
+- Return JSON only: {{"paragraphs": ["p1", "p2", "..."]}}
+- The array length MUST be exactly {len(body_seeds)}.
+- Locked paragraphs must be copied verbatim with identical wording and punctuation.
+- Unlocked paragraphs should be rewritten from their seed text while improving flow and relevance.
+- Use locked paragraphs as context to keep cohesion and avoid contradictions.
+- No bullets; plain paragraphs only.
+- Keep it concise, human, and professional. No fluff.
+- Avoid em dashes entirely.
+- The candidate has already graduated (August 2025). Do not imply they are still in school.
+- Structure: Opening (interest + fit), Body (concrete strengths), Closing (gratitude + next steps + brief thank-you).
+- Prefer a concise role title; if the job title is long or has commas/slashes, use a shortened form.
+
+Candidate profile:
+{json.dumps(resume, ensure_ascii=False)}
+
+Job:
+Title: {title}
+Short title (if needed): {short_title}
+Company: {job.get('company','')}
+Location: {job.get('location','')}
+Workplace: {job.get('workplace','')}
+Description:
+{job.get('description','') or job.get('raw_card_text','')}
+{feedback_line}
+""".strip()
+
+
+def _load_templates() -> Dict[str, Any]:
+    if not TEMPLATES_PATH.exists():
+        return {"templates": []}
+    data = json.loads(TEMPLATES_PATH.read_text(encoding="utf-8"))
+    if isinstance(data, list):
+        return {"templates": data}
+    if isinstance(data, dict) and "templates" in data:
+        return data
+    return {"templates": []}
+
+
+def _save_templates(data: Dict[str, Any]) -> None:
+    TEMPLATES_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _find_template(templates: Dict[str, Any], template_id: str) -> Optional[Dict[str, Any]]:
+    items = templates.get("templates") or []
+    for item in items:
+        if item.get("id") == template_id:
+            return item
+    return None
 
 
 @app.get("/jobs")
@@ -319,6 +504,53 @@ def api_get_settings():
     return {"preferences": prefs, "rules": rules}
 
 
+@app.get("/cover-letter-templates")
+def api_cover_letter_templates():
+    data = _load_templates()
+    return {"items": data.get("templates") or []}
+
+
+@app.post("/cover-letter-templates")
+def api_cover_letter_template_create(payload: CoverLetterTemplateIn):
+    data = _load_templates()
+    items = data.get("templates") or []
+    now = datetime.utcnow().isoformat() + "Z"
+    item = {
+        "id": uuid.uuid4().hex,
+        "text": payload.text or "",
+        "created_at": now,
+        "updated_at": now,
+    }
+    items.append(item)
+    data["templates"] = items
+    _save_templates(data)
+    return {"ok": True, "item": item}
+
+
+@app.put("/cover-letter-templates/{template_id}")
+def api_cover_letter_template_update(template_id: str, payload: CoverLetterTemplateIn):
+    data = _load_templates()
+    item = _find_template(data, template_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Template not found")
+    item["text"] = payload.text or ""
+    item["updated_at"] = datetime.utcnow().isoformat() + "Z"
+    _save_templates(data)
+    return {"ok": True, "item": item}
+
+
+@app.delete("/cover-letter-templates/{template_id}")
+def api_cover_letter_template_delete(template_id: str):
+    data = _load_templates()
+    items = data.get("templates") or []
+    next_items = [i for i in items if i.get("id") != template_id]
+    if len(next_items) == len(items):
+        raise HTTPException(status_code=404, detail="Template not found")
+    data["templates"] = next_items
+    _save_templates(data)
+    return {"ok": True}
+
+
 @app.get("/cover-letters/{job_id}")
 def api_cover_letters(job_id: int):
     return {"items": list_cover_letters(job_id)}
@@ -330,15 +562,52 @@ def api_cover_letter_generate(payload: CoverLetterGenerateIn):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     resume = _load_json(_get_base_dir() / "resume_profile.json")
-    prompt = _cover_letter_prompt(job, resume, payload.feedback or "")
     model = (payload.model or COVER_LETTER_MODEL).strip() or COVER_LETTER_MODEL
+    template_text = ""
+    if payload.template_id:
+        data = _load_templates()
+        item = _find_template(data, payload.template_id)
+        if not item:
+            raise HTTPException(status_code=404, detail="Template not found")
+        template_text = item.get("text") or ""
+
+    draft_text = (payload.draft or "").strip()
+    source_text = draft_text or template_text
+    sections = _split_cover_sections(source_text)
+    body_seeds = sections.get("body") or []
+    if not body_seeds:
+        body_seeds = ["", "", ""]
+
+    locked_indices = sorted(set(payload.locked_indices or []))
+    locked_indices = [i for i in locked_indices if 0 <= i < len(body_seeds)]
+    locked_map = {i: body_seeds[i] for i in locked_indices}
+
+    prompt = _cover_letter_prompt_locked(job, resume, payload.feedback or "", body_seeds, locked_map)
     try:
         text = _call_model(prompt, model).strip()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Cover letter generation failed: {exc}")
     if not text:
         raise HTTPException(status_code=500, detail="Model returned empty cover letter.")
-    cover_id = insert_cover_letter(payload.job_id, text, payload.feedback or "", model)
+
+    paragraphs = _parse_model_paragraphs(text)
+    if not paragraphs:
+        raise HTTPException(status_code=500, detail="Model returned invalid cover letter.")
+
+    final_body: List[str] = []
+    for i, seed in enumerate(body_seeds):
+        if i in locked_map:
+            final_body.append(locked_map[i])
+        elif i < len(paragraphs):
+            final_body.append(paragraphs[i])
+        else:
+            final_body.append(seed)
+
+    ensure_date = bool(payload.template_id)
+    final_text = _assemble_cover_letter(sections, final_body, ensure_date, job.get("company", "") or "")
+    if not final_text:
+        raise HTTPException(status_code=500, detail="Model returned empty cover letter.")
+    cover_id = insert_cover_letter(payload.job_id, final_text, payload.feedback or "", model)
     return {"ok": True, "id": cover_id}
 
 

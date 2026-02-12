@@ -1,10 +1,49 @@
 [
   {
-    "score": 6,
+    "score": 12,
+    "qualification_score": 0.6,
+    "url": "https://www.linkedin.com/jobs/view/4371573275/",
+    "title": "GTM Operations Analyst",
+    "company": "RemoteHunter",
+    "workplace": "remote",
+    "posted": "1 hour ago\nWithin the past 24 hours",
+    "reasons": [
+      "workplace:remote",
+      "posted:+19"
+    ]
+  },
+  {
+    "score": 11,
+    "qualification_score": 0.6,
+    "url": "https://www.linkedin.com/jobs/view/4371551838/",
+    "title": "EDI Functional Analyst",
+    "company": "Jobs via Dice",
+    "workplace": "remote",
+    "posted": "2 hours ago\nWithin the past 24 hours",
+    "reasons": [
+      "workplace:remote",
+      "posted:+18"
+    ]
+  },
+  {
+    "score": 9,
     "qualification_score": 0.5,
-    "url": "https://www.linkedin.com/jobs/view/4366558933/",
-    "title": "Configuration Specialist",
-    "company": "tango",
+    "url": "https://www.linkedin.com/jobs/view/4372112452/",
+    "title": "Business Solutions Specialist",
+    "company": "Horizon Payments",
+    "workplace": "remote",
+    "posted": "4 hours ago\nWithin the past 24 hours",
+    "reasons": [
+      "workplace:remote",
+      "posted:+16"
+    ]
+  },
+  {
+    "score": 6,
+    "qualification_score": 0.6,
+    "url": "https://www.linkedin.com/jobs/view/4371517348/",
+    "title": "Customer Facing AI Business Analyst",
+    "company": "Atigro",
     "workplace": "remote",
     "posted": "7 hours ago\nWithin the past 24 hours",
     "reasons": [
@@ -13,49 +52,89 @@
     ]
   },
   {
-    "score": 1,
+    "score": 2,
     "qualification_score": 0.5,
-    "url": "https://www.linkedin.com/jobs/view/4370470238/",
-    "title": "Operations Generalist",
-    "company": "Drink Hippie",
+    "url": "https://www.linkedin.com/jobs/view/4371836455/",
+    "title": "Product Support Associate - Remote",
+    "company": "ExecutivePlacements.com",
     "workplace": "remote",
-    "posted": "12 hours ago\nWithin the past 24 hours",
+    "posted": "11 hours ago\nWithin the past 24 hours",
     "reasons": [
       "workplace:remote",
-      "posted:+8"
+      "posted:+9"
     ]
   },
   {
-    "score": 0,
+    "score": -1,
     "qualification_score": 0.6,
-    "url": "https://www.linkedin.com/jobs/view/4370439980/",
-    "title": "Support Analyst",
-    "company": "RemoteHunter",
+    "url": "https://www.linkedin.com/jobs/view/4371816559/",
+    "title": "Launch Operations Analyst",
+    "company": "Tidal Financial Group",
     "workplace": "remote",
-    "posted": "13 hours ago\nWithin the past 24 hours",
+    "posted": "14 hours ago\nWithin the past 24 hours",
     "reasons": [
       "workplace:remote",
-      "posted:+7"
+      "posted:+6"
     ]
   },
   {
-    "score": -7,
+    "score": -5,
     "qualification_score": 0.6,
-    "url": "https://www.linkedin.com/jobs/view/4370914396/",
-    "title": "Complaint Analyst",
+    "url": "https://www.linkedin.com/jobs/view/4371656572/",
+    "title": "Applications Analyst II",
     "company": "Jobgether",
     "workplace": "remote",
-    "posted": "",
+    "posted": "19 hours ago\nWithin the past 24 hours",
     "reasons": [
-      "workplace:remote"
+      "workplace:remote",
+      "posted:+2"
+    ]
+  },
+  {
+    "score": -5,
+    "qualification_score": 0.6,
+    "url": "https://www.linkedin.com/jobs/view/4371637950/",
+    "title": "Business Systems Analyst",
+    "company": "Lensa",
+    "workplace": "remote",
+    "posted": "20 hours ago\nWithin the past 24 hours",
+    "reasons": [
+      "workplace:remote",
+      "posted:+2"
+    ]
+  },
+  {
+    "score": -5,
+    "qualification_score": 0.6,
+    "url": "https://www.linkedin.com/jobs/view/4371444867/",
+    "title": "RFP Analyst",
+    "company": "Symetra",
+    "workplace": "remote",
+    "posted": "23 hours ago\nWithin the past 24 hours",
+    "reasons": [
+      "workplace:remote",
+      "posted:+2"
+    ]
+  },
+  {
+    "score": -5,
+    "qualification_score": 0.6,
+    "url": "https://www.linkedin.com/jobs/view/4371655196/",
+    "title": "Assoc Analyst Business",
+    "company": "Lensa",
+    "workplace": "remote",
+    "posted": "20 hours ago\nWithin the past 24 hours",
+    "reasons": [
+      "workplace:remote",
+      "posted:+2"
     ]
   },
   {
     "score": -7,
     "qualification_score": 0.6,
-    "url": "https://www.linkedin.com/jobs/view/4370459374/",
-    "title": "GTM Operations Analyst",
-    "company": "RemoteHunter",
+    "url": "https://www.linkedin.com/jobs/view/4342969150/",
+    "title": "Product Analyst",
+    "company": "Origami Risk",
     "workplace": "remote",
     "posted": "",
     "reasons": [
@@ -63,79 +142,101 @@
     ]
   },
   {
-    "score": -7,
+    "score": -9,
     "qualification_score": 0.5,
-    "url": "https://www.linkedin.com/jobs/view/4370948187/",
-    "title": "Analytics Associate (Option for Senior)",
-    "company": "Priorities USA",
+    "url": "https://www.linkedin.com/jobs/view/4371357827/",
+    "title": "Entry Level Super Rater",
+    "company": "Jobs via Dice",
     "workplace": "remote",
-    "posted": "",
+    "posted": "14 hours ago\nWithin the past 24 hours",
     "reasons": [
-      "workplace:remote"
+      "workplace:remote",
+      "posted:+6",
+      "wrong_field:-16",
+      "entry:+8"
     ]
   },
   {
-    "score": -7,
-    "qualification_score": 0.5,
-    "url": "https://www.linkedin.com/jobs/view/4361874943/",
-    "title": "Associate, Business Operations",
-    "company": "Jerry",
+    "score": -17,
+    "qualification_score": 0.526,
+    "url": "https://www.linkedin.com/jobs/view/4371361988/",
+    "title": "Student Research Assistant I _Non-FWS",
+    "company": "Orchestrate Consulting Group",
     "workplace": "remote",
-    "posted": "",
+    "posted": "14 hours ago\nWithin the past 24 hours",
     "reasons": [
-      "workplace:remote"
+      "workplace:remote",
+      "posted:+6",
+      "wrong_field:-16"
     ]
   },
   {
-    "score": -7,
+    "score": -21,
     "qualification_score": 0.5,
-    "url": "https://www.linkedin.com/jobs/view/4370843895/",
-    "title": "Operations Associate",
-    "company": "TheGuarantors",
+    "url": "https://www.linkedin.com/jobs/view/4371307695/",
+    "title": "Site Development Administrator",
+    "company": "TeleWorld Solutions",
     "workplace": "remote",
-    "posted": "",
+    "posted": "23 hours ago\nWithin the past 24 hours",
     "reasons": [
-      "workplace:remote"
-    ]
-  },
-  {
-    "score": -7,
-    "qualification_score": 0.5,
-    "url": "https://www.linkedin.com/jobs/view/4370563308/",
-    "title": "Data Services Specialist",
-    "company": "Swooped",
-    "workplace": "remote",
-    "posted": "",
-    "reasons": [
-      "workplace:remote"
+      "workplace:remote",
+      "posted:+2",
+      "wrong_field:-16"
     ]
   },
   {
     "score": -24,
     "qualification_score": 0.6,
-    "url": "https://www.linkedin.com/jobs/view/4370902991/",
-    "title": "Business Development & Market Intelligence Analyst",
-    "company": "Wordly",
+    "url": "https://www.linkedin.com/jobs/view/4367171037/",
+    "title": "SHARED SERVICES DATA QUALITY ANALYST",
+    "company": "C2Q Health Solutions",
     "workplace": "remote",
     "posted": "7 hours ago\nWithin the past 24 hours",
     "reasons": [
       "workplace:remote",
       "posted:+13",
-      "sales_adjacent:-30"
+      "healthcare:-30"
     ]
   },
   {
     "score": -31,
     "qualification_score": 0.6,
-    "url": "https://www.linkedin.com/jobs/view/4264204595/",
-    "title": "Selected Reserve (SELRES) Analyst",
-    "company": "Taku Health Services, LLC",
+    "url": "https://www.linkedin.com/jobs/view/4371355924/",
+    "title": "Business Analyst",
+    "company": "Pinnacle Method Consulting",
     "workplace": "remote",
-    "posted": "1 day ago",
+    "posted": "14 hours ago\nWithin the past 24 hours",
     "reasons": [
       "workplace:remote",
       "posted:+6",
       "healthcare:-30"
+    ]
+  },
+  {
+    "score": -35,
+    "qualification_score": 0.6,
+    "url": "https://www.linkedin.com/jobs/view/4371451501/",
+    "title": "Sales Compensation Analyst- Remote",
+    "company": "BeyondTrust",
+    "workplace": "remote",
+    "posted": "23 hours ago\nWithin the past 24 hours",
+    "reasons": [
+      "workplace:remote",
+      "posted:+2",
+      "sales_adjacent:-30"
+    ]
+  },
+  {
+    "score": -37,
+    "qualification_score": 0.6,
+    "url": "https://www.linkedin.com/jobs/view/4358879656/",
+    "title": "Sales Operations Analyst",
+    "company": "Owlet Baby Care",
+    "workplace": "remote",
+    "posted": "",
+    "reasons": [
+      "workplace:remote",
+      "sales_adjacent:-30"
     ]
   }
 ]

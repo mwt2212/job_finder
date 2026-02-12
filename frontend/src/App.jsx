@@ -48,6 +48,133 @@ function classNames(...items) {
   return items.filter(Boolean).join(" ");
 }
 
+const MONTHS = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December"
+];
+const DATE_REGEX = /^(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4}$/i;
+const GREETING_REGEX = /^dear\b/i;
+const SIGNATURE_REGEX = /^(sincerely|best|regards|respectfully|yours)\b/i;
+
+function formatDate(date) {
+  const month = MONTHS[date.getMonth()];
+  return `${month} ${date.getDate()}, ${date.getFullYear()}`;
+}
+
+function currentDateString() {
+  return formatDate(new Date());
+}
+
+function splitBlocks(text) {
+  if (!text) return [];
+  return text
+    .split(/\n\s*\n+/)
+    .map((t) => t.trim())
+    .filter(Boolean);
+}
+
+function splitCoverSections(text) {
+  const blocks = splitBlocks(text);
+  let greetingIdx = null;
+  let signatureIdx = null;
+  blocks.forEach((block, idx) => {
+    const firstLine = (block.split("\n")[0] || "").trim();
+    if (greetingIdx === null && GREETING_REGEX.test(firstLine)) greetingIdx = idx;
+    if (signatureIdx === null && SIGNATURE_REGEX.test(firstLine)) signatureIdx = idx;
+  });
+  if (greetingIdx !== null && signatureIdx !== null && signatureIdx < greetingIdx) {
+    signatureIdx = null;
+  }
+  const header = greetingIdx !== null ? blocks.slice(0, greetingIdx) : [];
+  const greeting = greetingIdx !== null ? blocks[greetingIdx] : "";
+  const bodyStart = greetingIdx !== null ? greetingIdx + 1 : 0;
+  const bodyEnd = signatureIdx !== null ? signatureIdx : blocks.length;
+  const body = blocks.slice(bodyStart, bodyEnd);
+  const signature = signatureIdx !== null ? blocks.slice(signatureIdx) : [];
+  return { header, greeting, body, signature };
+}
+
+function applyDateToHeader(blocks, ensureDate, company) {
+  if (!blocks.length && !ensureDate) return [];
+  let replaced = false;
+  const updated = blocks
+    .map((block) => {
+      const lines = block.split("\n").map((line) => {
+        if (DATE_REGEX.test(line.trim())) {
+          replaced = true;
+          return currentDateString();
+        }
+        if (company && line.trim().toLowerCase() === "ruan") {
+          return company;
+        }
+        return line;
+      });
+      return lines.join("\n").trim();
+    })
+    .filter(Boolean);
+  if (ensureDate && !replaced) {
+    return [currentDateString(), ...updated].filter(Boolean);
+  }
+  return updated;
+}
+
+function applyDateToTemplate(text, company) {
+  if (!text) return text;
+  const sections = splitCoverSections(text);
+  const header = applyDateToHeader(sections.header, true, company);
+  const parts = [
+    ...header,
+    sections.greeting,
+    ...sections.body,
+    ...sections.signature
+  ].filter(Boolean);
+  return parts.join("\n\n");
+}
+
+function labelForParagraph(index, total) {
+  if (total === 0) return "";
+  if (index === 0) return "Opening";
+  if (index === total - 1) return "Closing";
+  return `Body ${index}`;
+}
+
+function parseProgressLine(line) {
+  if (!line) return null;
+  const capMatch = line.match(/Cap:\s*(\d+)\s*jobs/i);
+  if (capMatch) {
+    const total = Number(capMatch[1]);
+    return { current: 0, total, pct: 0, label: "scout" };
+  }
+  const totalMatch = line.match(/Total:\s*(\d+)/i);
+  if (totalMatch) {
+    const current = Number(totalMatch[1]);
+    return { current, total: null, pct: null };
+  }
+  const bracketMatch = line.match(/\[(\d+)\s*\/\s*(\d+)\]/);
+  if (bracketMatch) {
+    const current = Number(bracketMatch[1]);
+    const total = Number(bracketMatch[2]);
+    const pct = total ? (current / total) * 100 : 0;
+    return { current, total, pct };
+  }
+  const capReached = line.match(/Reached cap of\s*(\d+)/i);
+  if (capReached) {
+    const total = Number(capReached[1]);
+    return { current: total, total, pct: 100 };
+  }
+  return null;
+}
+
 function displayRegex(lines) {
   return (lines || [])
     .map((l) => {
@@ -208,16 +335,33 @@ export default function App() {
   const [coverLetters, setCoverLetters] = useState([]);
   const [coverSelectedId, setCoverSelectedId] = useState(null);
   const [coverDraft, setCoverDraft] = useState({ content: "", feedback: "" });
+  const [coverTemplates, setCoverTemplates] = useState([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const [templateModalOpen, setTemplateModalOpen] = useState(false);
+  const [templateModalMode, setTemplateModalMode] = useState("new");
+  const [templateDraftText, setTemplateDraftText] = useState("");
+  const [lockStates, setLockStates] = useState([]);
+  const [lockStatesByVersion, setLockStatesByVersion] = useState({});
   const [coverStatus, setCoverStatus] = useState("");
   const [coverModel, setCoverModel] = useState("gpt-4.1");
   const [coverSearch, setCoverSearch] = useState("");
   const COVER_MODELS = ["gpt-5.1", "gpt-5", "gpt-4.1"];
+  const selectedTemplate = coverTemplates.find((t) => t.id === selectedTemplateId) || null;
+  const bodyParagraphs = splitCoverSections(coverDraft.content || "").body;
+  const selectedTemplateBodyCount = selectedTemplate
+    ? splitCoverSections(selectedTemplate.text || "").body.length
+    : 0;
+  const templateWarning =
+    selectedTemplate && (selectedTemplateBodyCount < 3 || selectedTemplateBodyCount > 5)
+      ? `Template has ${selectedTemplateBodyCount} body paragraphs (recommended 3-5).`
+      : "";
 
   useEffect(() => {
     fetchJobs();
     fetchCoverJobs();
     fetchSettings();
     fetchSearches();
+    fetchCoverTemplates();
   }, []);
 
   useEffect(() => {
@@ -278,6 +422,9 @@ export default function App() {
       setCoverJob(null);
       setCoverLetters([]);
       setCoverSelectedId(null);
+      setCoverDraft({ content: "", feedback: "" });
+      setSelectedTemplateId("");
+      setLockStatesByVersion({});
       return;
     }
     fetch(`${API}/jobs/${coverJobId}`)
@@ -287,15 +434,25 @@ export default function App() {
   }, [coverJobId]);
 
   useEffect(() => {
-    if (!coverSelectedId) {
-      setCoverDraft({ content: "", feedback: "" });
-      return;
-    }
+    if (!coverSelectedId) return;
     const found = coverLetters.find((c) => c.id === coverSelectedId);
     if (found) {
       setCoverDraft({ content: found.content || "", feedback: found.feedback || "" });
     }
   }, [coverSelectedId, coverLetters]);
+
+  useEffect(() => {
+    if (!coverSelectedId) {
+      setLockStates([]);
+      return;
+    }
+    const saved = lockStatesByVersion[coverSelectedId] || [];
+    if (!bodyParagraphs.length) {
+      setLockStates([]);
+      return;
+    }
+    setLockStates(bodyParagraphs.map((_, idx) => !!saved[idx]));
+  }, [bodyParagraphs.length, coverSelectedId, lockStatesByVersion]);
 
   const fetchJobs = () => {
     const params = new URLSearchParams();
@@ -322,6 +479,28 @@ export default function App() {
         setCoverLetters(items);
         if (items.length && !coverSelectedId) {
           setCoverSelectedId(items[0].id);
+        }
+      })
+      .catch(() => {});
+  };
+
+  useEffect(() => {
+    if (tab !== "cover") return;
+    setSelectedTemplateId("");
+    setCoverSelectedId(null);
+    setCoverDraft({ content: "", feedback: "" });
+    setLockStates([]);
+    setLockStatesByVersion({});
+  }, [tab]);
+
+  const fetchCoverTemplates = () => {
+    fetch(`${API}/cover-letter-templates`)
+      .then((r) => r.json())
+      .then((data) => {
+        const items = data.items || [];
+        setCoverTemplates(items);
+        if (selectedTemplateId && !items.find((t) => t.id === selectedTemplateId)) {
+          setSelectedTemplateId("");
         }
       })
       .catch(() => {});
@@ -401,6 +580,16 @@ export default function App() {
         source.onmessage = (event) => {
           setRunLog((prev) => prev + event.data + "\n");
           logCursorRef.current += 1;
+          const next = parseProgressLine(event.data);
+          if (next) {
+            setProgress((prev) => {
+              const total = next.total ?? prev.total;
+              const current = next.current ?? prev.current;
+              const pct = next.pct ?? (total ? (current / total) * 100 : prev.pct);
+              const label = next.label ?? prev.label;
+              return { current, total, pct, label };
+            });
+          }
         };
 
         source.addEventListener("done", (event) => {
@@ -465,6 +654,16 @@ export default function App() {
         source.onmessage = (event) => {
           setRunLog((prev) => prev + event.data + "\n");
           logCursorRef.current += 1;
+          const next = parseProgressLine(event.data);
+          if (next) {
+            setProgress((prev) => {
+              const total = next.total ?? prev.total;
+              const current = next.current ?? prev.current;
+              const pct = next.pct ?? (total ? (current / total) * 100 : prev.pct);
+              const label = next.label ?? prev.label;
+              return { current, total, pct, label };
+            });
+          }
         };
 
         source.addEventListener("done", (event) => {
@@ -561,13 +760,90 @@ export default function App() {
     });
   };
 
+  const openTemplateModal = (mode) => {
+    setTemplateModalMode(mode);
+    if (mode === "edit" && selectedTemplate) {
+      setTemplateDraftText(selectedTemplate.text || "");
+    } else if (mode === "duplicate" && selectedTemplate) {
+      setTemplateDraftText(selectedTemplate.text || "");
+    } else {
+      setTemplateDraftText("");
+    }
+    setTemplateModalOpen(true);
+  };
+
+  const saveTemplateDraft = () => {
+    const text = templateDraftText || "";
+    if (templateModalMode === "edit" && selectedTemplate) {
+      fetch(`${API}/cover-letter-templates/${selectedTemplate.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text })
+      })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data?.item?.id) {
+            setSelectedTemplateId(data.item.id);
+          }
+          setTemplateModalOpen(false);
+          fetchCoverTemplates();
+        })
+        .catch(() => {});
+      return;
+    }
+    fetch(`${API}/cover-letter-templates`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text })
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data?.item?.id) {
+          setSelectedTemplateId(data.item.id);
+        }
+        setTemplateModalOpen(false);
+        fetchCoverTemplates();
+      })
+      .catch(() => {});
+  };
+
+  const deleteTemplate = () => {
+    if (!selectedTemplate) return;
+    const ok = window.confirm("Delete this template? This cannot be undone.");
+    if (!ok) return;
+    fetch(`${API}/cover-letter-templates/${selectedTemplate.id}`, { method: "DELETE" })
+      .then(() => {
+        setSelectedTemplateId("");
+        fetchCoverTemplates();
+      })
+      .catch(() => {});
+  };
+
+  const applyTemplateToDraft = (templateId) => {
+    const template = coverTemplates.find((t) => t.id === templateId);
+    if (!template) return;
+    const updated = applyDateToTemplate(template.text || "", coverJob?.company || "");
+    setCoverDraft((prev) => ({ ...prev, content: updated }));
+    setCoverSelectedId(null);
+  };
+
   const generateCoverLetter = () => {
     if (!coverJobId) return;
     setCoverStatus("Generating...");
+    const locked_indices = lockStates
+      .map((locked, idx) => (locked ? idx : null))
+      .filter((v) => v !== null);
     fetch(`${API}/cover-letters/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ job_id: coverJobId, feedback: coverDraft.feedback, model: coverModel })
+      body: JSON.stringify({
+        job_id: coverJobId,
+        feedback: coverDraft.feedback,
+        model: coverModel,
+        template_id: selectedTemplateId || null,
+        draft: coverDraft.content,
+        locked_indices
+      })
     })
       .then(async (r) => {
         const data = await r.json().catch(() => ({}));
@@ -1291,6 +1567,7 @@ export default function App() {
                       onClick={() => {
                         setCoverJobId(job.id);
                         setCoverSelectedId(null);
+                        setSelectedTemplateId("");
                       }}
                     >
                       <span className="mini-title">{job.title}</span>
@@ -1313,7 +1590,10 @@ export default function App() {
                     <button
                       key={c.id}
                       className={classNames("cover-version", coverSelectedId === c.id && "active")}
-                      onClick={() => setCoverSelectedId(c.id)}
+                      onClick={() => {
+                        setCoverSelectedId(c.id);
+                        setSelectedTemplateId("");
+                      }}
                     >
                       {new Date(c.created_at).toLocaleString()} · {c.model || "model"}
                     </button>
@@ -1350,6 +1630,66 @@ export default function App() {
                   >
                     Copy
                   </button>
+                </div>
+                <div className="template-bar">
+                  <div className="field">
+                    <label>Template</label>
+                    <select
+                      value={selectedTemplateId}
+                      onChange={(e) => {
+                        const id = e.target.value;
+                        setSelectedTemplateId(id);
+                        if (id) applyTemplateToDraft(id);
+                      }}
+                    >
+                      <option value="">No template</option>
+                      {coverTemplates.map((t, idx) => (
+                        <option key={t.id} value={t.id}>{`Template ${idx + 1}`}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="template-actions">
+                    <button onClick={() => openTemplateModal("new")}>New template</button>
+                    <button onClick={() => openTemplateModal("edit")} disabled={!selectedTemplateId}>Edit template</button>
+                    <button onClick={() => openTemplateModal("duplicate")} disabled={!selectedTemplateId}>Duplicate</button>
+                    <button onClick={deleteTemplate} disabled={!selectedTemplateId}>Delete</button>
+                  </div>
+                </div>
+                {templateWarning && <div className="warning">{templateWarning}</div>}
+                <div className="lock-panel">
+                  <div className="lock-header">Lock paragraphs (per generation)</div>
+                  {bodyParagraphs.length === 0 && (
+                    <div className="empty">No paragraphs available. Select a template or add draft text.</div>
+                  )}
+                  {bodyParagraphs.map((para, idx) => (
+                    <div key={`lock-${idx}`} className={classNames("lock-row", lockStates[idx] && "locked")}>
+                      <div className="lock-meta">
+                        <div className="lock-label">{labelForParagraph(idx, bodyParagraphs.length)}</div>
+                        <label className="lock-toggle">
+                          <input
+                            type="checkbox"
+                            checked={!!lockStates[idx]}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              setLockStates((prev) => {
+                                const next = [...prev];
+                                next[idx] = checked;
+                                if (coverSelectedId) {
+                                  setLockStatesByVersion((map) => ({
+                                    ...map,
+                                    [coverSelectedId]: next
+                                  }));
+                                }
+                                return next;
+                              });
+                            }}
+                          />
+                          Lock
+                        </label>
+                      </div>
+                      <div className="lock-preview">{para.slice(0, 180)}{para.length > 180 ? "…" : ""}</div>
+                    </div>
+                  ))}
                 </div>
                 {coverStatus && <div className="saved">{coverStatus}</div>}
                 <div className="field">
@@ -1399,9 +1739,9 @@ export default function App() {
             <div className="field">
               <label>Size</label>
               <select value={sizePreset} onChange={(e) => setSizePreset(e.target.value)}>
-                <option value="Large">Large (1000 / 120 / 25)</option>
-                <option value="Medium">Medium (500 / 60 / 10)</option>
-                <option value="Small">Small (100 / 30 / 5)</option>
+                <option value="Large">Large (1000 / 120 / 50)</option>
+                <option value="Medium">Medium (500 / 60 / 20)</option>
+                <option value="Small">Small (100 / 30 / 10)</option>
               </select>
             </div>
             <button className="primary" onClick={runPipeline} disabled={running}>
@@ -1429,6 +1769,40 @@ export default function App() {
             <pre className="log" ref={logRef}>{runLog}</pre>
           </div>
         </section>
+      )}
+
+      {templateModalOpen && (
+        <div className="modal-backdrop" onClick={() => setTemplateModalOpen(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>
+              {templateModalMode === "edit"
+                ? "Edit Template"
+                : templateModalMode === "duplicate"
+                ? "Duplicate Template"
+                : "New Template"}
+            </h3>
+            <div className="field">
+              <label>Template text (use blank lines to separate paragraphs)</label>
+              <textarea
+                rows="12"
+                value={templateDraftText}
+                onChange={(e) => setTemplateDraftText(e.target.value)}
+                placeholder="Paste or write your template here."
+              />
+            </div>
+            {(() => {
+              const count = splitCoverSections(templateDraftText || "").body.length;
+              if (count && (count < 3 || count > 5)) {
+                return <div className="warning">Template has {count} body paragraphs (recommended 3-5).</div>;
+              }
+              return null;
+            })()}
+            <div className="modal-actions">
+              <button className="ghost" onClick={() => setTemplateModalOpen(false)}>Cancel</button>
+              <button className="primary" onClick={saveTemplateDraft}>Save template</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
