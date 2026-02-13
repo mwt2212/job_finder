@@ -11,6 +11,15 @@ from typing import Iterator
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from ai_usage import (
+    estimate_cost,
+    estimate_cost_range,
+    estimate_tokens,
+    get_avg_output_tokens,
+    load_pricing,
+    log_usage,
+)
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,6 +35,7 @@ from backend.db import (
     upsert_shortlist_feedback,
     upsert_ai_eval_feedback,
     update_bucket,
+    update_workplace,
     list_jobs,
     get_job,
     insert_run,
@@ -61,6 +71,8 @@ SCRIPT_NAMES = {
 
 COVER_LETTER_MODEL = "gpt-4.1"
 EXPORT_DIR = _get_base_dir() / "cover_letters"
+FILENAME_MAX = 120
+AI_EVAL_DEFAULT_BATCH = 5
 
 
 def _script_path(step: str) -> Path:
@@ -122,6 +134,7 @@ class StartIn(BaseModel):
     search: str
     size: str
     query: Optional[str] = ""
+    eval_model: Optional[str] = None
 
 
 class ShortlistFeedbackIn(BaseModel):
@@ -155,6 +168,11 @@ class CoverLetterTemplateIn(BaseModel):
     text: str
 
 
+class AiEstimatePipelineIn(BaseModel):
+    size: str
+    model: Optional[str] = None
+
+
 @app.on_event("startup")
 def _startup() -> None:
     print(f"Backend loaded from {__file__}", flush=True)
@@ -176,14 +194,33 @@ def api_debug_env():
     }
 
 
-def _call_model(prompt: str, model: str) -> str:
+def _extract_usage(resp) -> Dict[str, Any]:
+    usage = getattr(resp, "usage", None)
+    if not usage:
+        return {}
+    if isinstance(usage, dict):
+        return usage
+    payload: Dict[str, Any] = {}
+    for key in ["input_tokens", "output_tokens", "total_tokens", "cached_input_tokens"]:
+        val = getattr(usage, key, None)
+        if val is not None:
+            payload[key] = val
+    for key in ["prompt_tokens", "completion_tokens"]:
+        val = getattr(usage, key, None)
+        if val is not None:
+            payload[key] = val
+    return payload
+
+
+def _call_model(prompt: str, model: str) -> Dict[str, Any]:
+    temp = 1.0 if model.startswith("gpt-5") else 0.4
     if OpenAI:
         client = OpenAI()
         if hasattr(client, "responses"):
             resp = client.responses.create(model=model, input=prompt)
             text = getattr(resp, "output_text", "") or ""
             if text:
-                return text
+                return {"text": text, "usage": _extract_usage(resp)}
         if hasattr(client, "chat"):
             resp = client.chat.completions.create(
                 model=model,
@@ -191,9 +228,9 @@ def _call_model(prompt: str, model: str) -> str:
                     {"role": "system", "content": "You write concise, professional cover letters."},
                     {"role": "user", "content": prompt},
                 ],
-                temperature=0.4,
+                temperature=temp,
             )
-            return resp.choices[0].message.content or ""
+            return {"text": resp.choices[0].message.content or "", "usage": _extract_usage(resp)}
 
     import openai  # type: ignore
     resp = openai.ChatCompletion.create(
@@ -202,9 +239,12 @@ def _call_model(prompt: str, model: str) -> str:
             {"role": "system", "content": "You write concise, professional cover letters."},
             {"role": "user", "content": prompt},
         ],
-        temperature=0.4,
+        temperature=temp,
     )
-    return resp["choices"][0]["message"]["content"] or ""
+    return {
+        "text": resp["choices"][0]["message"]["content"] or "",
+        "usage": (resp.get("usage") or {}),
+    }
 
 
 def _cover_letter_prompt(job: Dict[str, Any], resume: Dict[str, Any], feedback: str) -> str:
@@ -326,10 +366,113 @@ def _assemble_cover_letter(
     parts: List[str] = []
     parts.extend([h for h in header if h.strip()])
     if greeting.strip():
+        # Extra newline after company block before greeting
+        parts.append("")
         parts.append(greeting.strip())
-    parts.extend([p.strip() for p in body_paragraphs if str(p).strip()])
-    parts.extend([s for s in signature if str(s).strip()])
+    indented_body = []
+    for p in body_paragraphs:
+        text = str(p).strip()
+        if text:
+            indented_body.append("    " + text)
+    parts.extend(indented_body)
+    if signature:
+        # Extra newline before sign-off
+        parts.append("")
+        parts.extend([s for s in signature if str(s).strip()])
     return "\n\n".join(parts).strip()
+
+
+def _safe_filename(text: str) -> str:
+    if not text:
+        return ""
+    safe = re.sub(r"[<>:\"/\\\\|?*]", "", text)
+    safe = re.sub(r"\s+", " ", safe).strip().strip(".")
+    return safe[:FILENAME_MAX].strip()
+
+
+def _pdf_safe_text(text: str) -> str:
+    if not text:
+        return ""
+    replacements = {
+        "\u2014": "-",  # em dash
+        "\u2013": "-",  # en dash
+        "\u2019": "'",  # right single quote
+        "\u2018": "'",  # left single quote
+        "\u201c": '"',  # left double quote
+        "\u201d": '"',  # right double quote
+        "\u2026": "...",  # ellipsis
+        "\u00a0": " ",  # non-breaking space
+    }
+    for src, dst in replacements.items():
+        text = text.replace(src, dst)
+    # Strip remaining non-latin-1 characters to avoid FPDF encoding errors
+    return text.encode("latin-1", errors="ignore").decode("latin-1")
+
+
+def _split_paragraphs_preserve_blanks(text: str) -> List[str]:
+    if text is None:
+        return []
+    lines = text.splitlines()
+    parts: List[str] = []
+    buf: List[str] = []
+    saw_blank = False
+    for line in lines:
+        if line.strip() == "":
+            if buf:
+                parts.append("\n".join(buf).strip())
+                buf = []
+                saw_blank = True
+            else:
+                parts.append("")
+                saw_blank = True
+        else:
+            buf.append(line)
+            saw_blank = False
+    if buf:
+        parts.append("\n".join(buf).strip())
+    elif saw_blank:
+        parts.append("")
+    return parts
+
+
+def _unique_export_path(base: Path) -> Path:
+    if not base.exists():
+        return base
+    stem = base.stem
+    suffix = base.suffix
+    parent = base.parent
+    for i in range(2, 50):
+        candidate = parent / f"{stem} ({i}){suffix}"
+        if not candidate.exists():
+            return candidate
+    return parent / f"{stem} ({uuid.uuid4().hex[:6]}){suffix}"
+
+
+def _split_blocks_simple(text: str) -> List[str]:
+    if text is None:
+        return []
+    return [b.strip() for b in re.split(r"\n\s*\n+", text) if b.strip()]
+
+
+def _split_cover_sections_from_text(text: str) -> Dict[str, Any]:
+    blocks = _split_blocks_simple(text)
+    greeting_idx = None
+    signature_idx = None
+    for i, block in enumerate(blocks):
+        first_line = (block.splitlines()[0] if block.splitlines() else "").strip()
+        if greeting_idx is None and GREETING_RE.match(first_line or ""):
+            greeting_idx = i
+        if signature_idx is None and SIGNATURE_RE.match(first_line or ""):
+            signature_idx = i
+    if greeting_idx is not None and signature_idx is not None and signature_idx < greeting_idx:
+        signature_idx = None
+    header = blocks[:greeting_idx] if greeting_idx is not None else []
+    greeting = blocks[greeting_idx] if greeting_idx is not None else ""
+    body_start = greeting_idx + 1 if greeting_idx is not None else 0
+    body_end = signature_idx if signature_idx is not None else len(blocks)
+    body = blocks[body_start:body_end]
+    signature = blocks[signature_idx:] if signature_idx is not None else []
+    return {"header": header, "greeting": greeting, "body": body, "signature": signature}
 
 
 def _parse_model_paragraphs(text: str) -> List[str]:
@@ -392,6 +535,185 @@ Description:
 {job.get('description','') or job.get('raw_card_text','')}
 {feedback_line}
 """.strip()
+
+
+def _estimate_cover_letter(
+    job: Dict[str, Any],
+    resume: Dict[str, Any],
+    payload: CoverLetterGenerateIn,
+    model: str,
+) -> Dict[str, Any]:
+    template_text = ""
+    if payload.template_id:
+        data = _load_templates()
+        item = _find_template(data, payload.template_id)
+        template_text = item.get("text") if item else ""
+
+    draft_text = (payload.draft or "").strip()
+    source_text = draft_text or template_text
+    sections = _split_cover_sections(source_text)
+    body_seeds = sections.get("body") or []
+    if not body_seeds:
+        body_seeds = ["", "", ""]
+
+    locked_indices = sorted(set(payload.locked_indices or []))
+    locked_indices = [i for i in locked_indices if 0 <= i < len(body_seeds)]
+    locked_map = {i: body_seeds[i] for i in locked_indices}
+
+    prompt = _cover_letter_prompt_locked(job, resume, payload.feedback or "", body_seeds, locked_map)
+    input_tokens_est = estimate_tokens(prompt)
+    output_tokens_est = get_avg_output_tokens("cover_letter", model, default=350)
+
+    pricing = load_pricing()
+    cost_est = estimate_cost(pricing, model, input_tokens_est, output_tokens_est) if pricing else None
+    cost_range = estimate_cost_range(pricing, model, input_tokens_est, output_tokens_est) if pricing else {"low": None, "high": None}
+    return {
+        "model": model,
+        "input_tokens_est": input_tokens_est,
+        "output_tokens_est": output_tokens_est,
+        "cost_est": cost_est,
+        "cost_est_range": cost_range,
+    }
+
+
+def _estimate_ai_eval(size: str, model_override: Optional[str] = None) -> Dict[str, Any]:
+    cfg = SIZE_PRESETS.get(size)
+    if not cfg:
+        raise HTTPException(status_code=400, detail="Invalid size")
+
+    final_top = int(cfg.get("final_top") or 0)
+    job_count = final_top
+    avg_desc_chars = 4800
+
+    resume = _load_json(_get_base_dir() / "resume_profile.json")
+    prefs = _load_json(PREFERENCES_PATH)
+    base_prompt = f"""
+You are evaluating job fit for a candidate. Be strict and practical.
+
+Candidate profile (truth source):
+{json.dumps(resume, ensure_ascii=False)}
+
+Preferences profile:
+{json.dumps(prefs, ensure_ascii=False)}
+
+Jobs to evaluate (array, in order):
+[]
+
+Rules:
+- Candidate strongly prefers minimal cold calling. If outbound-heavy or sales-centric, cold_call_risk=high and next_action=skip.
+- Must be full-time. If unclear, employment_type_ok=false and next_action=review_manually.
+- Hybrid preferred; remote acceptable; onsite only if standout.
+- Upward mobility: favor analyst/ops/compliance/data-adjacent roles with transferable skills.
+- Include job_summary: 1-2 sentences on what the role is about.
+Return ONLY a JSON array that matches the schema, in the same order as the jobs list.
+""".strip()
+    base_tokens = estimate_tokens(base_prompt)
+    sample_job = {
+        "url": "https://example.com",
+        "title": "Example Title",
+        "company": "Example Co",
+        "workplace": "remote",
+        "posted": "1 day ago",
+        "salary_hint": "",
+        "description": "x" * avg_desc_chars,
+    }
+    per_job_tokens = estimate_tokens(json.dumps(sample_job, ensure_ascii=False))
+    batch_size = AI_EVAL_DEFAULT_BATCH
+    batches = max(1, (job_count + batch_size - 1) // batch_size)
+    input_tokens_est = batches * base_tokens + job_count * per_job_tokens
+
+    model = (model_override or "").strip() or "gpt-4.1-mini"
+    output_per_job = get_avg_output_tokens("ai_eval", model, default=450)
+    output_tokens_est = output_per_job * job_count
+
+    pricing = load_pricing()
+    cost_est = estimate_cost(pricing, model, input_tokens_est, output_tokens_est) if pricing else None
+    cost_range = estimate_cost_range(pricing, model, input_tokens_est, output_tokens_est) if pricing else {"low": None, "high": None}
+
+    return {
+        "model": model,
+        "jobs_est": job_count,
+        "jobs_max": final_top,
+        "input_tokens_est": input_tokens_est,
+        "output_tokens_est": output_tokens_est,
+        "cost_est": cost_est,
+        "cost_est_range": cost_range,
+        "avg_desc_chars": avg_desc_chars,
+        "batch_size": batch_size,
+    }
+
+
+def _estimate_ai_eval_from_file(model_override: Optional[str] = None) -> Dict[str, Any]:
+    full_path = _get_base_dir() / "tier2_full.json"
+    if not full_path.exists():
+        raise HTTPException(status_code=400, detail="Missing tier2_full.json")
+    try:
+        data = json.loads(full_path.read_text(encoding="utf-8"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Failed to read tier2_full.json")
+
+    job_count = len(data)
+    avg_desc_chars = 4800
+    desc_lengths = [len((j.get("description") or "")) for j in data if (j.get("description") or "").strip()]
+    if desc_lengths:
+        avg_desc_chars = int(sum(desc_lengths) / len(desc_lengths))
+
+    resume = _load_json(_get_base_dir() / "resume_profile.json")
+    prefs = _load_json(PREFERENCES_PATH)
+    base_prompt = f"""
+You are evaluating job fit for a candidate. Be strict and practical.
+
+Candidate profile (truth source):
+{json.dumps(resume, ensure_ascii=False)}
+
+Preferences profile:
+{json.dumps(prefs, ensure_ascii=False)}
+
+Jobs to evaluate (array, in order):
+[]
+
+Rules:
+- Candidate strongly prefers minimal cold calling. If outbound-heavy or sales-centric, cold_call_risk=high and next_action=skip.
+- Must be full-time. If unclear, employment_type_ok=false and next_action=review_manually.
+- Hybrid preferred; remote acceptable; onsite only if standout.
+- Upward mobility: favor analyst/ops/compliance/data-adjacent roles with transferable skills.
+- Include job_summary: 1-2 sentences on what the role is about.
+Return ONLY a JSON array that matches the schema, in the same order as the jobs list.
+""".strip()
+    base_tokens = estimate_tokens(base_prompt)
+    sample_job = {
+        "url": "https://example.com",
+        "title": "Example Title",
+        "company": "Example Co",
+        "workplace": "remote",
+        "posted": "1 day ago",
+        "salary_hint": "",
+        "description": "x" * avg_desc_chars,
+    }
+    per_job_tokens = estimate_tokens(json.dumps(sample_job, ensure_ascii=False))
+    batch_size = AI_EVAL_DEFAULT_BATCH
+    batches = max(1, (job_count + batch_size - 1) // batch_size)
+    input_tokens_est = batches * base_tokens + job_count * per_job_tokens
+
+    model = (model_override or "").strip() or "gpt-4.1-mini"
+    output_per_job = get_avg_output_tokens("ai_eval", model, default=450)
+    output_tokens_est = output_per_job * job_count
+
+    pricing = load_pricing()
+    cost_est = estimate_cost(pricing, model, input_tokens_est, output_tokens_est) if pricing else None
+    cost_range = estimate_cost_range(pricing, model, input_tokens_est, output_tokens_est) if pricing else {"low": None, "high": None}
+
+    return {
+        "model": model,
+        "jobs_est": job_count,
+        "jobs_max": job_count,
+        "input_tokens_est": input_tokens_est,
+        "output_tokens_est": output_tokens_est,
+        "cost_est": cost_est,
+        "cost_est_range": cost_range,
+        "avg_desc_chars": avg_desc_chars,
+        "batch_size": batch_size,
+    }
 
 
 def _load_templates() -> Dict[str, Any]:
@@ -504,6 +826,32 @@ def api_get_settings():
     return {"preferences": prefs, "rules": rules}
 
 
+@app.get("/ai/pricing")
+def api_ai_pricing():
+    return load_pricing()
+
+
+@app.post("/ai/estimate/cover-letter")
+def api_ai_estimate_cover_letter(payload: CoverLetterGenerateIn):
+    job = get_job(payload.job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    resume = _load_json(_get_base_dir() / "resume_profile.json")
+    model = (payload.model or COVER_LETTER_MODEL).strip() or COVER_LETTER_MODEL
+    return _estimate_cover_letter(job, resume, payload, model)
+
+
+@app.post("/ai/estimate/pipeline")
+def api_ai_estimate_pipeline(payload: AiEstimatePipelineIn):
+    return _estimate_ai_eval(payload.size, payload.model)
+
+
+@app.post("/ai/estimate/eval")
+def api_ai_estimate_eval(payload: Optional[AiEstimatePipelineIn] = None):
+    model = payload.model if payload else None
+    return _estimate_ai_eval_from_file(model)
+
+
 @app.get("/cover-letter-templates")
 def api_cover_letter_templates():
     data = _load_templates()
@@ -583,8 +931,15 @@ def api_cover_letter_generate(payload: CoverLetterGenerateIn):
     locked_map = {i: body_seeds[i] for i in locked_indices}
 
     prompt = _cover_letter_prompt_locked(job, resume, payload.feedback or "", body_seeds, locked_map)
+    pricing = load_pricing()
+    output_tokens_est = get_avg_output_tokens("cover_letter", model, default=350)
+    input_tokens_est = estimate_tokens(prompt)
+    cost_est = estimate_cost(pricing, model, input_tokens_est, output_tokens_est) if pricing else None
+    cost_range = estimate_cost_range(pricing, model, input_tokens_est, output_tokens_est) if pricing else {"low": None, "high": None}
     try:
-        text = _call_model(prompt, model).strip()
+        resp = _call_model(prompt, model)
+        text = (resp.get("text") or "").strip()
+        usage = resp.get("usage") or {}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Cover letter generation failed: {exc}")
     if not text:
@@ -607,6 +962,33 @@ def api_cover_letter_generate(payload: CoverLetterGenerateIn):
     final_text = _assemble_cover_letter(sections, final_body, ensure_date, job.get("company", "") or "")
     if not final_text:
         raise HTTPException(status_code=500, detail="Model returned empty cover letter.")
+    input_tokens_actual = usage.get("input_tokens") or usage.get("prompt_tokens")
+    output_tokens_actual = usage.get("output_tokens") or usage.get("completion_tokens")
+    cached_input_tokens = usage.get("cached_input_tokens")
+    cost_actual = None
+    if input_tokens_actual is not None and output_tokens_actual is not None:
+        cost_actual = estimate_cost(
+            pricing,
+            model,
+            int(input_tokens_actual),
+            int(output_tokens_actual),
+            int(cached_input_tokens or 0),
+        )
+    log_usage(
+        {
+            "kind": "cover_letter",
+            "model": model,
+            "unit_count": 1,
+            "input_tokens_est": input_tokens_est,
+            "output_tokens_est": output_tokens_est,
+            "cost_est": cost_est,
+            "cost_est_range": cost_range,
+            "input_tokens": input_tokens_actual,
+            "output_tokens": output_tokens_actual,
+            "cached_input_tokens": cached_input_tokens,
+            "cost_actual": cost_actual,
+        }
+    )
     cover_id = insert_cover_letter(payload.job_id, final_text, payload.feedback or "", model)
     return {"ok": True, "id": cover_id}
 
@@ -625,25 +1007,42 @@ def api_cover_letter_export(cover_id: int, format: str = "txt"):
     letter = get_cover_letter(cover_id)
     if not letter:
         raise HTTPException(status_code=404, detail="Cover letter not found")
+    job = get_job(letter.get("job_id")) if letter.get("job_id") else None
+    company = _safe_filename(job.get("company", "") if job else "")
+    filename_base = "Cover Letter"
+    if company:
+        filename_base = f"Cover Letter - {company}"
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
     safe_id = int(letter["id"])
     if format == "txt":
-        path = EXPORT_DIR / f"cover_letter_{safe_id}.txt"
+        path = _unique_export_path(EXPORT_DIR / f"{filename_base}.txt")
         path.write_text(letter["content"], encoding="utf-8")
-        return FileResponse(path, media_type="text/plain", filename=path.name)
+        return {"ok": True, "path": str(path)}
 
     if format == "docx":
         try:
             from docx import Document  # type: ignore
+            from docx.shared import Inches  # type: ignore
         except Exception:
             raise HTTPException(status_code=500, detail="python-docx not installed")
         doc = Document()
-        for para in letter["content"].split("\n"):
-            if para.strip():
-                doc.add_paragraph(para.strip())
-        path = EXPORT_DIR / f"cover_letter_{safe_id}.docx"
+        sections = _split_cover_sections_from_text(letter["content"])
+        for block in sections["header"]:
+            doc.add_paragraph(block)
+        if sections["greeting"]:
+            doc.add_paragraph("")
+            doc.add_paragraph(sections["greeting"])
+        for block in sections["body"]:
+            p = doc.add_paragraph()
+            p.paragraph_format.first_line_indent = Inches(0.3)
+            p.add_run(block)
+        if sections["signature"]:
+            doc.add_paragraph("")
+            for block in sections["signature"]:
+                doc.add_paragraph(block)
+        path = _unique_export_path(EXPORT_DIR / f"{filename_base}.docx")
         doc.save(path)
-        return FileResponse(path, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", filename=path.name)
+        return {"ok": True, "path": str(path)}
 
     if format == "pdf":
         try:
@@ -653,14 +1052,27 @@ def api_cover_letter_export(cover_id: int, format: str = "txt"):
         pdf = FPDF()
         pdf.set_auto_page_break(auto=True, margin=15)
         pdf.add_page()
-        pdf.set_font("Helvetica", size=12)
-        for para in letter["content"].split("\n"):
-            if para.strip():
-                pdf.multi_cell(0, 6, para.strip())
+        pdf.set_font("Times", size=12)
+        sections = _split_cover_sections_from_text(letter["content"])
+        for block in sections["header"]:
+            pdf.multi_cell(0, 7, _pdf_safe_text(block))
+            pdf.ln(2)
+        if sections["greeting"]:
+            pdf.ln(4)
+            pdf.multi_cell(0, 7, _pdf_safe_text(sections["greeting"]))
+            pdf.ln(2)
+        for block in sections["body"]:
+            pdf.set_x(pdf.l_margin + 6)
+            pdf.multi_cell(0, 7, _pdf_safe_text(block))
+            pdf.ln(2)
+        if sections["signature"]:
+            pdf.ln(4)
+            for block in sections["signature"]:
+                pdf.multi_cell(0, 7, _pdf_safe_text(block))
                 pdf.ln(2)
-        path = EXPORT_DIR / f"cover_letter_{safe_id}.pdf"
+        path = _unique_export_path(EXPORT_DIR / f"{filename_base}.pdf")
         pdf.output(str(path))
-        return FileResponse(path, media_type="application/pdf", filename=path.name)
+        return {"ok": True, "path": str(path)}
 
     raise HTTPException(status_code=400, detail="Unsupported format")
 
@@ -694,6 +1106,22 @@ def api_run_start(payload: StartIn):
     searches = json.loads(SEARCHES_PATH.read_text(encoding="utf-8"))
     if payload.search not in searches:
         raise HTTPException(status_code=400, detail="Invalid search")
+    _sync_search_location_preference(payload.search, searches)
+    try:
+        est = _estimate_ai_eval(payload.size, payload.eval_model)
+        log_usage(
+            {
+                "kind": "ai_eval_estimate",
+                "model": est.get("model"),
+                "unit_count": est.get("jobs_est"),
+                "input_tokens_est": est.get("input_tokens_est"),
+                "output_tokens_est": est.get("output_tokens_est"),
+                "cost_est": est.get("cost_est"),
+                "cost_est_range": est.get("cost_est_range"),
+            }
+        )
+    except Exception:
+        pass
     with RUN_STATE["lock"]:
         if RUN_STATE["running"]:
             raise HTTPException(status_code=409, detail="Another step is running")
@@ -709,7 +1137,7 @@ def api_run_start(payload: StartIn):
 
     thread = threading.Thread(
         target=_run_pipeline_thread,
-        args=(payload.search, payload.size, payload.query or ""),
+        args=(payload.search, payload.size, payload.query or "", payload.eval_model),
         daemon=True,
     )
     thread.start()
@@ -717,12 +1145,34 @@ def api_run_start(payload: StartIn):
 
 
 @app.post("/run/{step}")
-def api_run_step(step: str, search: Optional[str] = None, query: Optional[str] = None):
+def api_run_step(step: str, search: Optional[str] = None, query: Optional[str] = None, model: Optional[str] = None):
     if step not in SCRIPT_NAMES:
         raise HTTPException(status_code=400, detail="Invalid step")
     script = _script_path(step)
     if not script.exists():
         raise HTTPException(status_code=404, detail=f"Missing script: {script.name}")
+    if step == "eval":
+        try:
+            est = _estimate_ai_eval_from_file(model)
+            log_usage(
+                {
+                    "kind": "ai_eval_estimate",
+                    "model": est.get("model"),
+                    "unit_count": est.get("jobs_est"),
+                    "input_tokens_est": est.get("input_tokens_est"),
+                    "output_tokens_est": est.get("output_tokens_est"),
+                    "cost_est": est.get("cost_est"),
+                    "cost_est_range": est.get("cost_est_range"),
+                }
+            )
+        except Exception:
+            pass
+    if step == "scout" and search and SEARCHES_PATH.exists():
+        try:
+            searches = json.loads(SEARCHES_PATH.read_text(encoding="utf-8"))
+            _sync_search_location_preference(search, searches)
+        except Exception:
+            pass
 
     with RUN_STATE["lock"]:
         if RUN_STATE["running"]:
@@ -859,7 +1309,7 @@ def _script_args(step: str, search: Optional[str], query: Optional[str] = None) 
     return args
 
 
-def _script_args_with_size(step: str, search: str, size: str, query: str) -> List[str]:
+def _script_args_with_size(step: str, search: str, size: str, query: str, eval_model: Optional[str] = None) -> List[str]:
     cfg = SIZE_PRESETS[size]
     args = _script_args(step, search, query)
     if step == "scout":
@@ -870,12 +1320,14 @@ def _script_args_with_size(step: str, search: str, size: str, query: str) -> Lis
         args.extend(["--limit", str(cfg["final_top"])])
     if step == "eval":
         args.extend(["--limit", str(cfg["final_top"])])
+        if eval_model:
+            args.extend(["--model", eval_model])
     if step == "sort":
         args.extend(["--final-top", str(cfg["final_top"])])
     return args
 
 
-def _run_pipeline_thread(search: str, size: str, query: str) -> None:
+def _run_pipeline_thread(search: str, size: str, query: str, eval_model: Optional[str] = None) -> None:
     started = datetime.utcnow().isoformat() + "Z"
     status = "ok"
     log_lines: List[str] = []
@@ -888,7 +1340,7 @@ def _run_pipeline_thread(search: str, size: str, query: str) -> None:
             with RUN_STATE["lock"]:
                 RUN_STATE["step"] = step
                 RUN_STATE["lines"].append(f"== {step} ==")
-            args = _script_args_with_size(step, search, size, query)
+            args = _script_args_with_size(step, search, size, query, eval_model)
             proc = subprocess.Popen(
                 [sys.executable, "-u", *args],
                 cwd=str(base_dir),
@@ -1083,7 +1535,11 @@ def import_scored(path: Path) -> int:
         if job_id <= 0:
             continue
         eval_json = job.get("ai_eval") or {}
-        upsert_ai_eval(job_id, eval_json, model="gpt-4.1-mini")
+        model_name = str(job.get("ai_model") or job.get("model") or "gpt-4.1-mini")
+        upsert_ai_eval(job_id, eval_json, model=model_name)
+        ai_workplace = (eval_json.get("workplace_type") or "").lower().strip()
+        if ai_workplace in {"remote", "hybrid", "onsite", "unknown"}:
+            update_workplace(job_id, ai_workplace)
         count += 1
         if count == 1 or count % 25 == 0 or count == total:
             with RUN_STATE["lock"]:
@@ -1171,6 +1627,24 @@ def _apply_op(prefs: Dict[str, Any], op: Dict[str, Any]) -> None:
             cur[key].append(value)
     elif op.get("op") == "set":
         cur[key] = value
+
+
+def _sync_search_location_preference(search_label: str, searches: Dict[str, Any]) -> None:
+    selected = searches.get(search_label) if isinstance(searches, dict) else None
+    if not isinstance(selected, dict):
+        return
+    location_label = (selected.get("location_label") or "").strip()
+    if not location_label:
+        return
+    prefs = _load_json(PREFERENCES_PATH)
+    search_filters = prefs.get("search_filters")
+    if not isinstance(search_filters, dict):
+        search_filters = {}
+    if search_filters.get("location_city") == location_label:
+        return
+    search_filters["location_city"] = location_label
+    prefs["search_filters"] = search_filters
+    _save_json(PREFERENCES_PATH, prefs)
 
 
 def _auto_tune_from_shortlist(job_id: int, verdict: str, reason: str) -> None:
@@ -1277,14 +1751,14 @@ def _auto_tune_from_ai(job_id: int, correct_bucket: str) -> None:
         apply_min = max(60, apply_min - 2)
         changed.append({"tuning.sort_thresholds.apply_min_score": apply_min})
     elif correct_bucket == "skip" and model_action != "skip":
-        review_min = max(40, review_min - 2)
+        review_min = min(apply_min - 1, review_min + 2)
         changed.append({"tuning.sort_thresholds.review_min_score": review_min})
     elif correct_bucket == "review" and model_action == "apply":
         apply_min = min(85, apply_min + 2)
         changed.append({"tuning.sort_thresholds.apply_min_score": apply_min})
 
     if review_min >= apply_min:
-        review_min = apply_min - 10
+        review_min = max(40, apply_min - 10)
         changed.append({"tuning.sort_thresholds.review_min_score": review_min})
 
     if changed:

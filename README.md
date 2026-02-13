@@ -50,6 +50,12 @@ Default batch size is 5. It evaluates jobs in order and writes `tier2_scored.jso
 - The date is normalized to `MMMM D, YYYY` during generation.
 - A header line equal to `Ruan` is replaced with the job’s company name.
 
+## AI Cost Tracking
+
+- Pricing lives in `ai_pricing.json`.
+- Usage is logged to `ai_usage.jsonl`, with rollups in `ai_usage_totals.json`.
+- Estimates are shown in the UI next to AI actions.
+
 ## Auto-Reload (Dev)
 
 `run-backend.py` now runs Uvicorn with `reload=True`. This auto-restarts the backend on file changes.

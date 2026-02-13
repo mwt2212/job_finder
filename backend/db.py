@@ -285,6 +285,11 @@ def update_bucket(job_id: int, bucket: str) -> None:
         conn.execute("UPDATE jobs SET bucket = ? WHERE id = ?", (bucket, job_id))
 
 
+def update_workplace(job_id: int, workplace: str) -> None:
+    with _connect() as conn:
+        conn.execute("UPDATE jobs SET workplace = ? WHERE id = ?", (workplace, job_id))
+
+
 def list_jobs(
     search: Optional[str] = None,
     workplace: Optional[str] = None,
@@ -345,7 +350,6 @@ def list_jobs(
             j.location,
             j.workplace,
             j.posted,
-            j.scraped_at,
             j.scraped_at,
             j.salary_hint,
             j.bucket,

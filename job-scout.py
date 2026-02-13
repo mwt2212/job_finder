@@ -177,6 +177,23 @@ def infer_workplace(text_blob: str) -> str:
         return "onsite"
     return ""
 
+def is_posted_text(text: str) -> bool:
+    t = (text or "").lower().strip()
+    if not t:
+        return False
+    if "just now" in t or "today" in t or "yesterday" in t:
+        return True
+    if "repost" in t:
+        return True
+    if re.search(r"\b\d+\s*(min|minute|hour|day|week|month)s?\b", t):
+        return True
+    if re.search(r"\b\d+\s*(min|minute|hour|day|week|month)s?\s+ago\b", t):
+        return True
+    return False
+
+def normalize_posted(text: str) -> str:
+    return text.strip() if is_posted_text(text) else ""
+
 def extract_company(li):
     """
     LinkedIn A/B tests these. Try a few robust patterns.
@@ -248,14 +265,14 @@ def extract_fields_from_card(li_locator, job_url: str, location_label: str):
 
     # Posted
     posted = safe_text(li_locator.locator("time"))
+    posted = normalize_posted(posted)
     if not posted:
         posted_guess = ""
         for line in (raw.splitlines() if raw else []):
-            low = line.lower()
-            if "ago" in low or "hour" in low or "hours" in low or "day" in low or "days" in low or "minute" in low:
+            if is_posted_text(line):
                 posted_guess = line.strip()
                 break
-        posted = posted_guess
+        posted = normalize_posted(posted_guess)
 
     workplace = infer_workplace(raw)
 

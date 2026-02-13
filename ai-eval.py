@@ -1,11 +1,21 @@
 import json
 import time
 from pathlib import Path
+from typing import Any, Dict, Tuple
 
 try:
     from openai import OpenAI  # type: ignore
 except Exception:  # pragma: no cover - fallback for legacy SDKs
     OpenAI = None  # type: ignore
+
+from ai_usage import (
+    estimate_cost,
+    estimate_cost_range,
+    estimate_tokens,
+    get_avg_output_tokens,
+    load_pricing,
+    log_usage,
+)
 
 # ================== PATHS (FIXED) ==================
 BASE_DIR = Path(__file__).parent
@@ -26,6 +36,7 @@ JSON_SCHEMA = {
         "cold_call_risk": {"type": "string", "enum": ["low", "medium", "high"]},
         "employment_type_ok": {"type": "boolean"},
         "workplace_match": {"type": "string", "enum": ["good", "ok", "bad", "unknown"]},
+        "workplace_type": {"type": "string", "enum": ["remote", "hybrid", "onsite", "unknown"]},
         "mobility_signal": {"type": "string", "enum": ["high", "medium", "low", "unknown"]},
         "salary_verdict": {"type": "string", "enum": ["meets", "below", "unknown"]},
         "job_summary": {"type": "string"},
@@ -41,6 +52,7 @@ JSON_SCHEMA = {
         "cold_call_risk",
         "employment_type_ok",
         "workplace_match",
+        "workplace_type",
         "mobility_signal",
         "salary_verdict",
         "job_summary",
@@ -79,7 +91,25 @@ def _extract_json_block(text: str) -> str:
     return text[start : end + 1].strip()
 
 
-def _call_model(prompt: str, model: str, schema: dict) -> str:
+def _extract_usage(resp) -> Dict[str, Any]:
+    usage = getattr(resp, "usage", None)
+    if not usage:
+        return {}
+    if isinstance(usage, dict):
+        return usage
+    payload: Dict[str, Any] = {}
+    for key in ["input_tokens", "output_tokens", "total_tokens", "cached_input_tokens"]:
+        val = getattr(usage, key, None)
+        if val is not None:
+            payload[key] = val
+    for key in ["prompt_tokens", "completion_tokens"]:
+        val = getattr(usage, key, None)
+        if val is not None:
+            payload[key] = val
+    return payload
+
+
+def _call_model(prompt: str, model: str, schema: dict) -> Tuple[str, Dict[str, Any]]:
     # New SDK (Responses API)
     if client and hasattr(client, "responses"):
         resp = client.responses.create(
@@ -94,38 +124,42 @@ def _call_model(prompt: str, model: str, schema: dict) -> str:
                 }
             },
         )
-        return extract_output_text(resp)
+        return extract_output_text(resp), _extract_usage(resp)
 
     # New SDK (Chat Completions)
     if client and hasattr(client, "chat"):
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[
+        kwargs = {
+            "model": model,
+            "messages": [
                 {
                     "role": "system",
                     "content": "Return only valid JSON that matches the provided schema.",
                 },
                 {"role": "user", "content": prompt + "\n\nJSON Schema:\n" + json.dumps(schema)},
             ],
-            temperature=0,
-        )
-        return resp.choices[0].message.content or ""
+        }
+        if not model.startswith("gpt-5"):
+            kwargs["temperature"] = 0
+        resp = client.chat.completions.create(**kwargs)
+        return resp.choices[0].message.content or "", _extract_usage(resp)
 
     # Legacy SDK (openai.ChatCompletion)
     import openai  # type: ignore
 
-    resp = openai.ChatCompletion.create(
-        model=model,
-        messages=[
+    kwargs = {
+        "model": model,
+        "messages": [
             {
                 "role": "system",
                 "content": "Return only valid JSON that matches the provided schema.",
             },
             {"role": "user", "content": prompt + "\n\nJSON Schema:\n" + json.dumps(schema)},
         ],
-        temperature=0,
-    )
-    return resp["choices"][0]["message"]["content"] or ""
+    }
+    if not model.startswith("gpt-5"):
+        kwargs["temperature"] = 0
+    resp = openai.ChatCompletion.create(**kwargs)
+    return resp["choices"][0]["message"]["content"] or "", (resp.get("usage") or {})
 
 
 def main():
@@ -133,6 +167,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=0, help="Limit number of jobs to evaluate")
     parser.add_argument("--batch-size", type=int, default=5, help="Number of jobs per model call")
+    parser.add_argument("--model", type=str, default="", help="Model override")
     args = parser.parse_args()
 
     if not INFILE.exists():
@@ -146,8 +181,9 @@ def main():
     resume = json.loads(RESUME.read_text(encoding="utf-8"))
     prefs = json.loads(PREFS.read_text(encoding="utf-8")) if PREFS.exists() else {}
 
+    pricing = load_pricing()
     results = [None for _ in jobs]
-    MODEL = "gpt-4.1-mini"
+    MODEL = (args.model or "").strip() or "gpt-4.1-mini"
 
     eval_jobs = []
     for idx, job in enumerate(jobs):
@@ -159,6 +195,7 @@ def main():
                 "cold_call_risk": "unknown",
                 "employment_type_ok": False,
                 "workplace_match": "unknown",
+                "workplace_type": "unknown",
                 "mobility_signal": "unknown",
                 "salary_verdict": "unknown",
                 "job_summary": "Description missing or too short to summarize.",
@@ -168,7 +205,7 @@ def main():
                 "missing_gaps": [],
                 "next_action": "review_manually"
             }
-            results[idx] = {**job, "ai_eval": eval_result}
+            results[idx] = {**job, "ai_model": MODEL, "ai_eval": eval_result}
         else:
             eval_jobs.append((idx, job, desc))
 
@@ -214,10 +251,17 @@ Rules:
 - Hybrid preferred; remote acceptable; onsite only if standout.
 - Upward mobility: favor analyst/ops/compliance/data-adjacent roles with transferable skills.
 - Include job_summary: 1-2 sentences on what the role is about.
+- Set workplace_type based on the full description: remote, hybrid, onsite, or unknown.
 Return ONLY a JSON array that matches the schema, in the same order as the jobs list.
 """.strip()
 
-        out_text = _call_model(prompt, MODEL, array_schema)
+        input_tokens_est = estimate_tokens(prompt)
+        avg_output_per_job = get_avg_output_tokens("ai_eval", MODEL, default=450)
+        output_tokens_est = avg_output_per_job * len(batch)
+        cost_est = estimate_cost(pricing, MODEL, input_tokens_est, output_tokens_est) if pricing else None
+        cost_range = estimate_cost_range(pricing, MODEL, input_tokens_est, output_tokens_est) if pricing else {"low": None, "high": None}
+
+        out_text, usage = _call_model(prompt, MODEL, array_schema)
         if not out_text:
             raise RuntimeError("Model returned empty output text; cannot parse JSON.")
 
@@ -233,14 +277,45 @@ Return ONLY a JSON array that matches the schema, in the same order as the jobs 
             raise RuntimeError("Model returned invalid batch length.")
 
         for (idx, job, _), eval_result in zip(batch, eval_batch):
-            results[idx] = {**job, "ai_eval": eval_result}
+            results[idx] = {**job, "ai_model": MODEL, "ai_eval": eval_result}
 
-        OUTFILE.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
+        input_tokens_actual = usage.get("input_tokens") or usage.get("prompt_tokens")
+        output_tokens_actual = usage.get("output_tokens") or usage.get("completion_tokens")
+        cached_input_tokens = usage.get("cached_input_tokens")
+        cost_actual = None
+        if input_tokens_actual is not None and output_tokens_actual is not None:
+            cost_actual = estimate_cost(
+                pricing,
+                MODEL,
+                int(input_tokens_actual),
+                int(output_tokens_actual),
+                int(cached_input_tokens or 0),
+            )
+
+        log_usage(
+            {
+                "kind": "ai_eval",
+                "model": MODEL,
+                "unit_count": len(batch),
+                "input_tokens_est": input_tokens_est,
+                "output_tokens_est": output_tokens_est,
+                "cost_est": cost_est,
+                "cost_est_range": cost_range,
+                "input_tokens": input_tokens_actual,
+                "output_tokens": output_tokens_actual,
+                "cached_input_tokens": cached_input_tokens,
+                "cost_actual": cost_actual,
+            }
+        )
+
+        OUTFILE.write_text(json.dumps([r for r in results if r], ensure_ascii=False, indent=2), encoding="utf-8")
         for (idx, job, _), eval_result in zip(batch, eval_batch):
             print(f"[{idx + 1}/{len(jobs)}] {job.get('title','')[:60]} -> {eval_result['fit_score']} ({eval_result['next_action']})")
         time.sleep(0.25)
 
-    print(f"\nSaved {len(results)} scored jobs -> {OUTFILE}")
+    final_results = [r for r in results if r]
+    OUTFILE.write_text(json.dumps(final_results, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"\nSaved {len(final_results)} scored jobs -> {OUTFILE}")
 
 
 if __name__ == "__main__":

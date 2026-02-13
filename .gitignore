@@ -1,1 +1,7 @@
 chrome-profile/
+frontend/node_modules/
+__pycache__/
+*.pyc
+*.db
+*.jsonl
+cover_letters/

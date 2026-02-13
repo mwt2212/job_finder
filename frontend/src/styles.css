@@ -650,6 +650,21 @@ section {
   margin-bottom: 8px;
 }
 
+.ai-estimate {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1f6b4c;
+  background: #e9f5ef;
+  border: 1px solid #cfe7dd;
+  padding: 4px 10px;
+  border-radius: 999px;
+  margin-bottom: 8px;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;

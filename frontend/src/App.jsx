@@ -148,6 +148,19 @@ function labelForParagraph(index, total) {
   return `Body ${index}`;
 }
 
+function formatTokens(value) {
+  if (value == null) return "n/a";
+  if (value >= 1000000) return `${(value / 1000000).toFixed(2)}M`;
+  if (value >= 1000) return `${(value / 1000).toFixed(1)}k`;
+  return String(value);
+}
+
+function formatCost(value) {
+  if (value == null) return "n/a";
+  if (value < 0.01) return `$${value.toFixed(4)}`;
+  return `$${value.toFixed(3)}`;
+}
+
 function parseProgressLine(line) {
   if (!line) return null;
   const capMatch = line.match(/Cap:\s*(\d+)\s*jobs/i);
@@ -329,6 +342,7 @@ export default function App() {
   const logSourceRef = useRef(null);
   const logCursorRef = useRef(0);
   const logRef = useRef(null);
+  const coverEstimateTimer = useRef(null);
   const [detailSaved, setDetailSaved] = useState("");
   const [coverJobId, setCoverJobId] = useState(null);
   const [coverJob, setCoverJob] = useState(null);
@@ -342,10 +356,14 @@ export default function App() {
   const [templateDraftText, setTemplateDraftText] = useState("");
   const [lockStates, setLockStates] = useState([]);
   const [lockStatesByVersion, setLockStatesByVersion] = useState({});
+  const [coverEstimate, setCoverEstimate] = useState(null);
+  const [pipelineEstimate, setPipelineEstimate] = useState(null);
   const [coverStatus, setCoverStatus] = useState("");
   const [coverModel, setCoverModel] = useState("gpt-4.1");
   const [coverSearch, setCoverSearch] = useState("");
+  const [evalModel, setEvalModel] = useState("gpt-4.1-mini");
   const COVER_MODELS = ["gpt-5.1", "gpt-5", "gpt-4.1"];
+  const EVAL_MODELS = ["gpt-5-mini", "gpt-4.1-mini", "gpt-4.1", "gpt-5.1", "gpt-5"];
   const selectedTemplate = coverTemplates.find((t) => t.id === selectedTemplateId) || null;
   const bodyParagraphs = splitCoverSections(coverDraft.content || "").body;
   const selectedTemplateBodyCount = selectedTemplate
@@ -480,6 +498,11 @@ export default function App() {
         if (items.length && !coverSelectedId) {
           setCoverSelectedId(items[0].id);
         }
+        if (items.length === 0) {
+          setCoverSelectedId(null);
+          setCoverDraft({ content: "", feedback: "" });
+          setLockStates([]);
+        }
       })
       .catch(() => {});
   };
@@ -493,6 +516,32 @@ export default function App() {
     setLockStatesByVersion({});
   }, [tab]);
 
+  useEffect(() => {
+    if (tab !== "cover") return;
+    if (coverEstimateTimer.current) {
+      clearTimeout(coverEstimateTimer.current);
+    }
+    coverEstimateTimer.current = setTimeout(() => {
+      fetchCoverEstimate();
+    }, 400);
+    return () => {
+      if (coverEstimateTimer.current) clearTimeout(coverEstimateTimer.current);
+    };
+  }, [
+    tab,
+    coverJobId,
+    coverDraft.content,
+    coverDraft.feedback,
+    coverModel,
+    selectedTemplateId,
+    lockStates
+  ]);
+
+  useEffect(() => {
+    if (tab !== "pipeline") return;
+    fetchPipelineEstimate(sizePreset, evalModel);
+  }, [tab, sizePreset, evalModel]);
+
   const fetchCoverTemplates = () => {
     fetch(`${API}/cover-letter-templates`)
       .then((r) => r.json())
@@ -505,6 +554,44 @@ export default function App() {
       })
       .catch(() => {});
   };
+
+  const fetchCoverEstimate = () => {
+    if (!coverJobId) {
+      setCoverEstimate(null);
+      return;
+    }
+    const locked_indices = lockStates
+      .map((locked, idx) => (locked ? idx : null))
+      .filter((v) => v !== null);
+    fetch(`${API}/ai/estimate/cover-letter`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        job_id: coverJobId,
+        feedback: coverDraft.feedback,
+        model: coverModel,
+        template_id: selectedTemplateId || null,
+        draft: coverDraft.content,
+        locked_indices
+      })
+    })
+      .then((r) => r.json())
+      .then((data) => setCoverEstimate(data))
+      .catch(() => setCoverEstimate(null));
+  };
+
+  const fetchPipelineEstimate = (size, model) => {
+    if (!size) return;
+    fetch(`${API}/ai/estimate/pipeline`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ size, model })
+    })
+      .then((r) => r.json())
+      .then((data) => setPipelineEstimate(data))
+      .catch(() => setPipelineEstimate(null));
+  };
+
 
   const fetchSettings = () => {
     fetch(`${API}/settings`)
@@ -563,6 +650,7 @@ export default function App() {
     const params = new URLSearchParams();
     if (step === "scout" && selectedSearch) params.set("search", selectedSearch);
     if (step === "scout" && searchQuery) params.set("query", searchQuery);
+    if (step === "eval" && evalModel) params.set("model", evalModel);
     const searchParam = params.toString() ? `?${params.toString()}` : "";
     fetch(`${API}/run/${step}${searchParam}`, { method: "POST" })
       .then((r) => r.json())
@@ -629,7 +717,7 @@ export default function App() {
     fetch(`${API}/run/start`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ search: selectedSearch, size: sizePreset, query: searchQuery })
+      body: JSON.stringify({ search: selectedSearch, size: sizePreset, query: searchQuery, eval_model: evalModel })
     })
       .then(async (r) => {
         const data = await r.json().catch(() => ({}));
@@ -853,7 +941,13 @@ export default function App() {
         setCoverStatus("Saved");
         setTimeout(() => setCoverStatus(""), 1500);
         fetchCoverLetters(coverJobId);
-        if (data.id) setCoverSelectedId(data.id);
+        if (data.id) {
+          setLockStatesByVersion((map) => ({
+            ...map,
+            [data.id]: [...lockStates]
+          }));
+          setCoverSelectedId(data.id);
+        }
       })
       .catch((err) => {
         setCoverStatus(`Error: ${err.message || "Failed"}`);
@@ -878,7 +972,15 @@ export default function App() {
 
   const exportCoverLetter = (format) => {
     if (!coverSelectedId) return;
-    window.open(`${API}/cover-letters/export/${coverSelectedId}?format=${format}`, "_blank");
+    setCoverStatus("Exporting...");
+    fetch(`${API}/cover-letters/export/${coverSelectedId}?format=${format}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (!data || data.ok !== true) throw new Error("Export failed");
+        setCoverStatus(`Saved to ${data.path}`);
+        setTimeout(() => setCoverStatus(""), 2500);
+      })
+      .catch(() => setCoverStatus("Export failed"));
   };
 
   return (
@@ -1631,6 +1733,17 @@ export default function App() {
                     Copy
                   </button>
                 </div>
+                {coverEstimate && (
+                  <div className="ai-estimate">
+                    Est. {formatTokens(coverEstimate.input_tokens_est)} in / {formatTokens(coverEstimate.output_tokens_est)} out
+                    {coverEstimate.model ? ` · ${coverEstimate.model}` : ""}
+                    {" · "}
+                    {formatCost(coverEstimate.cost_est)}
+                    {coverEstimate.cost_est_range
+                      ? ` (${formatCost(coverEstimate.cost_est_range.low)}–${formatCost(coverEstimate.cost_est_range.high)})`
+                      : ""}
+                  </div>
+                )}
                 <div className="template-bar">
                   <div className="field">
                     <label>Template</label>
@@ -1744,9 +1857,29 @@ export default function App() {
                 <option value="Small">Small (100 / 30 / 10)</option>
               </select>
             </div>
+            <div className="field">
+              <label>AI eval model</label>
+              <select value={evalModel} onChange={(e) => setEvalModel(e.target.value)}>
+                {EVAL_MODELS.map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+            </div>
             <button className="primary" onClick={runPipeline} disabled={running}>
               Start
             </button>
+            {pipelineEstimate && (
+              <div className="ai-estimate">
+                Pipeline AI eval est. {formatTokens(pipelineEstimate.input_tokens_est)} in / {formatTokens(pipelineEstimate.output_tokens_est)} out
+                {pipelineEstimate.model ? ` · ${pipelineEstimate.model}` : ""}
+                {" · "}
+                {formatCost(pipelineEstimate.cost_est)}
+                {pipelineEstimate.cost_est_range
+                  ? ` (${formatCost(pipelineEstimate.cost_est_range.low)}–${formatCost(pipelineEstimate.cost_est_range.high)})`
+                  : ""}
+                {pipelineEstimate.jobs_est != null ? ` · jobs ${pipelineEstimate.jobs_est}` : ""}
+              </div>
+            )}
             <div className="pipeline-buttons">
               {["scout", "shortlist", "scrape", "eval"].map((step) => (
                 <button key={step} onClick={() => runStep(step)} disabled={running}>
