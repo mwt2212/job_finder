@@ -5,6 +5,7 @@ import re
 import os
 from pathlib import Path
 from playwright.sync_api import sync_playwright
+from text_cleaning import clean_job_description
 
 # ================== PATHS (FIXED) ==================
 BASE_DIR = Path(__file__).parent
@@ -65,6 +66,20 @@ def _resolve_viewport(page) -> dict:
     except Exception:
         pass
     return DEFAULT_VIEWPORT
+
+
+def _login_required(page) -> bool:
+    url = (page.url or "").lower()
+    if "linkedin.com/login" in url or "linkedin.com/checkpoint" in url:
+        return True
+    try:
+        if page.locator('input[name="session_key"]').count() > 0:
+            return True
+        if page.locator('a[href*="/login"]').count() > 0 and page.locator("text=Sign in").count() > 0:
+            return True
+    except Exception:
+        pass
+    return False
 
 # ================== EXTRACTION ==================
 def extract_job_description(page) -> str:
@@ -136,8 +151,14 @@ def main():
                 print(f"[{i}/{len(shortlist)}] Opening job page")
                 page.goto(job["url"], wait_until="domcontentloaded", timeout=60000)
                 sleep(2.5, 4.5)
+                if i == 1 and _login_required(page):
+                    raise RuntimeError(
+                        "LinkedIn login is required for scraping. Run `python setup-linkedin-profile.py`, sign in once, "
+                        "and reuse the same JOBFINDER_CHROME_PROFILE."
+                    )
 
-                desc = extract_job_description(page)
+                raw_desc = extract_job_description(page)
+                desc = clean_job_description(raw_desc)
                 salary = extract_salary_hint(desc)
 
                 results.append({

@@ -56,6 +56,23 @@ npm run dev
 
 Open `http://localhost:5173`.
 
+## One-Time LinkedIn Login Setup
+
+To keep scraping isolated from your personal browser, this project uses a dedicated Chrome profile.
+
+Run once:
+
+```powershell
+python setup-linkedin-profile.py
+```
+
+Then:
+- Sign in to LinkedIn in the opened browser window
+- Complete any security/checkpoint prompts
+- Return to terminal and press Enter to verify session
+
+After this, pipeline runs can reuse the saved session automatically.
+
 ## Configuration
 
 Environment variables:
@@ -121,6 +138,16 @@ Scraper captures fewer jobs per page than expected:
 Chrome profile lock error:
 - Close Chrome instances sharing the same profile
 - Or set `JOBFINDER_CHROME_PROFILE` to a dedicated folder
+
+LinkedIn login required during `scout` or `scrape`:
+- Run `python setup-linkedin-profile.py` once
+- Make sure the same `JOBFINDER_CHROME_PROFILE` path is used when running the backend/pipeline
+
+README preview image not showing on GitHub:
+- Ensure file exists in repo at `docs/dashboard-preview.png`
+- Check case-sensitive path (GitHub is case-sensitive)
+- Verify it is tracked by git:
+  - `git ls-files docs`
 
 AI calls fail:
 - Confirm `OPENAI_API_KEY` is exported in the backend shell

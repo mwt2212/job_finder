@@ -208,5 +208,8 @@ python run-backend.py
 Prompt with:
 - “Use `REPO_IMPROVEMENT_CONTEXT.md` and continue from step X in the execution plan.”
 
-This should provide enough context to continue without repeating discovery.
+For onboarding-system implementation handoff, also use:
+- `ONBOARDING_HANDOFF.md`
+- Prompt: “Use `ONBOARDING_HANDOFF.md` as source of truth and start from backend onboarding preflight/status endpoints.”
 
+This should provide enough context to continue without repeating discovery.

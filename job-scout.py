@@ -118,6 +118,20 @@ def _resolve_viewport(page) -> dict:
         pass
     return DEFAULT_VIEWPORT
 
+
+def _login_required(page) -> bool:
+    url = (page.url or "").lower()
+    if "linkedin.com/login" in url or "linkedin.com/checkpoint" in url:
+        return True
+    try:
+        if page.locator('input[name="session_key"]').count() > 0:
+            return True
+        if page.locator('a[href*="/login"]').count() > 0 and page.locator("text=Sign in").count() > 0:
+            return True
+    except Exception:
+        pass
+    return False
+
 # ================== FIND SCROLL PANEL ==================
 def find_results_panel(page):
     selectors = [
@@ -397,6 +411,11 @@ def main():
                 print(f"\nLoading start={start}")
                 page.goto(url, wait_until="domcontentloaded", timeout=60000)
                 sleep(*PAGE_LOAD_WAIT)
+                if idx == 0 and _login_required(page):
+                    raise RuntimeError(
+                        "LinkedIn login is required for scouting. Run `python setup-linkedin-profile.py`, sign in once, "
+                        "and reuse the same JOBFINDER_CHROME_PROFILE."
+                    )
 
                 # Make sure results exist
                 try:

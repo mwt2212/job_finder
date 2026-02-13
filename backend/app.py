@@ -19,6 +19,7 @@ from ai_usage import (
     load_pricing,
     log_usage,
 )
+from text_cleaning import clean_job_description
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse, FileResponse
@@ -1446,28 +1447,8 @@ def _append_tuning_log(entry: Dict[str, Any]) -> None:
     log_path.open("a", encoding="utf-8").write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
-DESCRIPTION_TRUNCATE_MARKERS = [
-    "set alert for similar jobs",
-    "see more jobs like this",
-    "job search smarter with premium",
-    "looking for talent?",
-    "linkedin corporation",
-    "about the company",
-    "select language",
-]
-
-
 def _clean_description_for_tuning(text: str) -> str:
-    if not text:
-        return ""
-    lines = (text or "").splitlines()
-    kept: List[str] = []
-    for line in lines:
-        low = line.strip().lower()
-        if any(marker in low for marker in DESCRIPTION_TRUNCATE_MARKERS):
-            break
-        kept.append(line)
-    return "\n".join(kept).strip()[:8000]
+    return clean_job_description(text, max_len=8000)
 
 
 def _extract_salary_floor_usd(job: Dict[str, Any]) -> Optional[int]:

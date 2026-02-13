@@ -16,6 +16,7 @@ from ai_usage import (
     load_pricing,
     log_usage,
 )
+from text_cleaning import clean_job_description
 
 # ================== PATHS (FIXED) ==================
 BASE_DIR = Path(__file__).parent
@@ -195,7 +196,7 @@ def main():
 
     eval_jobs = []
     for idx, job in enumerate(jobs):
-        desc = (job.get("description") or "").strip()
+        desc = clean_job_description((job.get("description") or ""))
         if len(desc) < 200:
             eval_result = {
                 "fit_score": 0,
