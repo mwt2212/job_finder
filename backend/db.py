@@ -475,3 +475,4 @@ def get_cover_letter(cover_id: int) -> Optional[Dict[str, Any]]:
             (cover_id,),
         ).fetchone()
         return dict(row) if row else None
+    
