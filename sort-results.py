@@ -3,16 +3,22 @@ import csv
 from pathlib import Path
 
 BASE_DIR = Path(__file__).parent
-INFILE = BASE_DIR / "tier2_scored.json"
+ARTIFACTS_DIR = BASE_DIR / "artifacts"
 PREFS = BASE_DIR / "preferences.json"
 
-OUT_APPLY_JSON  = BASE_DIR / "apply.json"
-OUT_REVIEW_JSON = BASE_DIR / "review.json"
-OUT_SKIP_JSON   = BASE_DIR / "skip.json"
+OUT_APPLY_JSON  = ARTIFACTS_DIR / "apply.json"
+OUT_REVIEW_JSON = ARTIFACTS_DIR / "review.json"
+OUT_SKIP_JSON   = ARTIFACTS_DIR / "skip.json"
 
-OUT_APPLY_CSV  = BASE_DIR / "apply.csv"
-OUT_REVIEW_CSV = BASE_DIR / "review.csv"
-OUT_SKIP_CSV   = BASE_DIR / "skip.csv"
+OUT_APPLY_CSV  = ARTIFACTS_DIR / "apply.csv"
+OUT_REVIEW_CSV = ARTIFACTS_DIR / "review.csv"
+OUT_SKIP_CSV   = ARTIFACTS_DIR / "skip.csv"
+
+
+def artifact_input(name: str) -> Path:
+    artifact = ARTIFACTS_DIR / name
+    legacy = BASE_DIR / name
+    return artifact if artifact.exists() else legacy
 
 def load_thresholds():
     if PREFS.exists():
@@ -78,7 +84,11 @@ def save_csv(path, items):
             w.writerow(row(it))
 
 def main():
-    data = json.loads(INFILE.read_text(encoding="utf-8"))
+    infile = artifact_input("tier2_scored.json")
+    if not infile.exists():
+        raise FileNotFoundError(f"Missing input file: {infile}")
+    data = json.loads(infile.read_text(encoding="utf-8"))
+    ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--final-top", type=int, default=0, help="Limit to top N across apply/review")

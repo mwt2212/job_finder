@@ -5,9 +5,11 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 BASE_DIR = Path(__file__).resolve().parent
+ARTIFACTS_DIR = BASE_DIR / "artifacts"
 PRICING_PATH = BASE_DIR / "ai_pricing.json"
-USAGE_LOG_PATH = BASE_DIR / "ai_usage.jsonl"
-TOTALS_PATH = BASE_DIR / "ai_usage_totals.json"
+USAGE_LOG_PATH = ARTIFACTS_DIR / "ai_usage.jsonl"
+TOTALS_PATH = ARTIFACTS_DIR / "ai_usage_totals.json"
+LEGACY_TOTALS_PATH = BASE_DIR / "ai_usage_totals.json"
 
 
 def estimate_tokens(text: str) -> int:
@@ -73,6 +75,8 @@ def estimate_cost_range(
 def _load_totals() -> Dict[str, Any]:
     if TOTALS_PATH.exists():
         return json.loads(TOTALS_PATH.read_text(encoding="utf-8"))
+    if LEGACY_TOTALS_PATH.exists():
+        return json.loads(LEGACY_TOTALS_PATH.read_text(encoding="utf-8"))
     return {
         "estimated": {"input_tokens": 0, "output_tokens": 0, "cost": 0.0},
         "actual": {"input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0, "cost": 0.0},
@@ -144,6 +148,7 @@ def _update_totals(totals: Dict[str, Any], entry: Dict[str, Any]) -> None:
 
 
 def log_usage(entry: Dict[str, Any]) -> None:
+    ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
     payload = dict(entry)
     payload["ts"] = datetime.utcnow().isoformat() + "Z"
     USAGE_LOG_PATH.open("a", encoding="utf-8").write(json.dumps(payload, ensure_ascii=False) + "\n")

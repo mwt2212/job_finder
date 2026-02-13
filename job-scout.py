@@ -5,6 +5,7 @@ import urllib.parse
 import math
 import re
 import argparse
+import os
 from pathlib import Path
 from collections import deque
 from playwright.sync_api import sync_playwright
@@ -12,16 +13,19 @@ from playwright.sync_api import sync_playwright
 # ================== CONFIG ==================
 BASE_URL = "https://www.linkedin.com/jobs/search/?distance=5&f_E=2&f_TPR=r86400&geoId=103112676&origin=JOB_SEARCH_PAGE_JOB_FILTER&sortBy=DD"
 OUTFILE = "tier2_metadata.json"
-SEARCHES_FILE = Path(__file__).parent / "searches.json"
+BASE_DIR = Path(__file__).parent
+ARTIFACTS_DIR = BASE_DIR / "artifacts"
+SEARCHES_FILE = BASE_DIR / "searches.json"
 
-CHROME_PROFILE_PATH = r"C:\Users\Michael\Desktop\Job Finder\chrome-profile"
+CHROME_PROFILE_PATH = Path(
+    os.getenv("JOBFINDER_CHROME_PROFILE") or (BASE_DIR / "chrome-profile")
+).expanduser()
 
 PAGE_SIZE = 25
 MAX_RESULTS = 1000  # hard cap for ETA + run length
 MAX_START = 5000  # upper bound; script stops when results end
 
-# Viewport: keep this. It’s what made 25/page reliable for you.
-VIEWPORT = {"width": 1280, "height": 1440}
+DEFAULT_VIEWPORT = {"width": 1280, "height": 1440}
 
 # Force location (since you’re filtering Chicago anyway)
 FORCED_LOCATION = "Chicago, IL"
@@ -70,6 +74,49 @@ def fmt_secs(sec):
     if h > 0:
         return f"{h}h {m}m {s}s"
     return f"{m}m {s}s"
+
+
+def _parse_viewport_override() -> dict | None:
+    raw = (os.getenv("JOBFINDER_VIEWPORT") or "").strip().lower()
+    if not raw:
+        return None
+    m = re.match(r"^\s*(\d{3,5})\s*[x,]\s*(\d{3,5})\s*$", raw)
+    if not m:
+        return None
+    w = int(m.group(1))
+    h = int(m.group(2))
+    if w < 600 or h < 600:
+        return None
+    return {"width": w, "height": h}
+
+
+def _resolve_viewport(page) -> dict:
+    override = _parse_viewport_override()
+    if override:
+        return override
+    # Prefer OS-level monitor size; Playwright's default emulated viewport
+    # can report 1280x720 before we set a real viewport.
+    try:
+        import ctypes
+
+        user32 = ctypes.windll.user32  # type: ignore[attr-defined]
+        sw = int(user32.GetSystemMetrics(0))
+        sh = int(user32.GetSystemMetrics(1))
+        if sw > 0 and sh > 0:
+            return {"width": max(900, sw // 2), "height": max(900, sh)}
+    except Exception:
+        pass
+    try:
+        dims = page.evaluate(
+            "() => ({w: window.screen.availWidth || window.screen.width || 0, h: window.screen.availHeight || window.screen.height || 0})"
+        )
+        sw = int((dims or {}).get("w") or 0)
+        sh = int((dims or {}).get("h") or 0)
+        if sw > 0 and sh > 0:
+            return {"width": max(900, sw // 2), "height": max(900, sh)}
+    except Exception:
+        pass
+    return DEFAULT_VIEWPORT
 
 # ================== FIND SCROLL PANEL ==================
 def find_results_panel(page):
@@ -313,7 +360,8 @@ def main():
     base_url = search_cfg.get("url") or BASE_URL
     location_label = search_cfg.get("location_label") or FORCED_LOCATION
 
-    out_path = Path(__file__).parent / OUTFILE
+    out_path = ARTIFACTS_DIR / OUTFILE
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     max_results = max(1, int(args.max_results))
     base = strip_param(base_url, "start")
     if args.query:
@@ -331,12 +379,14 @@ def main():
 
     with sync_playwright() as p:
         context = p.chromium.launch_persistent_context(
-            user_data_dir=CHROME_PROFILE_PATH,
+            user_data_dir=str(CHROME_PROFILE_PATH),
             headless=False,
             args=["--start-maximized"]
         )
         page = context.new_page()
-        page.set_viewport_size(VIEWPORT)
+        viewport = _resolve_viewport(page)
+        page.set_viewport_size(viewport)
+        print(f"Viewport: {viewport['width']}x{viewport['height']}")
 
         try:
             print(f"Cap: {max_results} jobs | Search: {args.search}")

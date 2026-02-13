@@ -5,10 +5,22 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-DB_PATH = BASE_DIR / "jobfinder.db"
+ARTIFACTS_DIR = BASE_DIR / "artifacts"
+ARTIFACT_DB_PATH = ARTIFACTS_DIR / "jobfinder.db"
+LEGACY_DB_PATH = BASE_DIR / "jobfinder.db"
+
+
+def _resolve_db_path() -> Path:
+    if ARTIFACT_DB_PATH.exists() or not LEGACY_DB_PATH.exists():
+        return ARTIFACT_DB_PATH
+    return LEGACY_DB_PATH
+
+
+DB_PATH = _resolve_db_path()
 
 
 def _connect() -> sqlite3.Connection:
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
@@ -266,6 +278,19 @@ def upsert_shortlist_feedback(job_id: int, verdict: str, reason: str) -> None:
         )
 
 
+def get_shortlist_feedback(job_id: int) -> Optional[Dict[str, Any]]:
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT job_id, verdict, reason, created_at
+            FROM shortlist_feedback
+            WHERE job_id = ?
+            """,
+            (job_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
 def upsert_ai_eval_feedback(job_id: int, correct_bucket: str, reasoning_quality: int) -> None:
     with _connect() as conn:
         conn.execute(
@@ -279,6 +304,20 @@ def upsert_ai_eval_feedback(job_id: int, correct_bucket: str, reasoning_quality:
             """,
             (job_id, correct_bucket, reasoning_quality, _now()),
         )
+
+
+def get_ai_eval_feedback(job_id: int) -> Optional[Dict[str, Any]]:
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT job_id, correct_bucket, reasoning_quality, created_at
+            FROM ai_eval_feedback
+            WHERE job_id = ?
+            """,
+            (job_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
 
 def update_bucket(job_id: int, bucket: str) -> None:
     with _connect() as conn:

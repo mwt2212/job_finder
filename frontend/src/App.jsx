@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-const API = "http://127.0.0.1:8001";
+const API = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8001";
 
 const DEFAULT_PREFS = {
   industry_preferences: { soft_penalize: ["healthcare"] },

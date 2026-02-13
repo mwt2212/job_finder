@@ -34,6 +34,8 @@ from backend.db import (
     upsert_status,
     upsert_shortlist_feedback,
     upsert_ai_eval_feedback,
+    get_shortlist_feedback,
+    get_ai_eval_feedback,
     update_bucket,
     update_workplace,
     list_jobs,
@@ -56,10 +58,12 @@ def _get_base_dir() -> Path:
 
 
 BASE_DIR = _get_base_dir()
+ARTIFACTS_DIR = BASE_DIR / "artifacts"
 PREFERENCES_PATH = BASE_DIR / "preferences.json"
 RULES_PATH = BASE_DIR / "shortlist_rules.json"
 SEARCHES_PATH = BASE_DIR / "searches.json"
 TEMPLATES_PATH = BASE_DIR / "cover_letter_templates.json"
+RESUME_PATH = BASE_DIR / "resume_profile.json"
 
 SCRIPT_NAMES = {
     "scout": "job-scout.py",
@@ -70,9 +74,19 @@ SCRIPT_NAMES = {
 }
 
 COVER_LETTER_MODEL = "gpt-4.1"
-EXPORT_DIR = _get_base_dir() / "cover_letters"
+EXPORT_DIR = ARTIFACTS_DIR / "cover_letters"
 FILENAME_MAX = 120
 AI_EVAL_DEFAULT_BATCH = 5
+
+
+def _artifact_path(name: str) -> Path:
+    return ARTIFACTS_DIR / name
+
+
+def _artifact_input_path(name: str) -> Path:
+    artifact = _artifact_path(name)
+    legacy = BASE_DIR / name
+    return artifact if artifact.exists() else legacy
 
 
 def _script_path(step: str) -> Path:
@@ -585,7 +599,7 @@ def _estimate_ai_eval(size: str, model_override: Optional[str] = None) -> Dict[s
     job_count = final_top
     avg_desc_chars = 4800
 
-    resume = _load_json(_get_base_dir() / "resume_profile.json")
+    resume = _load_json(RESUME_PATH)
     prefs = _load_json(PREFERENCES_PATH)
     base_prompt = f"""
 You are evaluating job fit for a candidate. Be strict and practical.
@@ -644,7 +658,7 @@ Return ONLY a JSON array that matches the schema, in the same order as the jobs 
 
 
 def _estimate_ai_eval_from_file(model_override: Optional[str] = None) -> Dict[str, Any]:
-    full_path = _get_base_dir() / "tier2_full.json"
+    full_path = _artifact_input_path("tier2_full.json")
     if not full_path.exists():
         raise HTTPException(status_code=400, detail="Missing tier2_full.json")
     try:
@@ -658,7 +672,7 @@ def _estimate_ai_eval_from_file(model_override: Optional[str] = None) -> Dict[st
     if desc_lengths:
         avg_desc_chars = int(sum(desc_lengths) / len(desc_lengths))
 
-    resume = _load_json(_get_base_dir() / "resume_profile.json")
+    resume = _load_json(RESUME_PATH)
     prefs = _load_json(PREFERENCES_PATH)
     base_prompt = f"""
 You are evaluating job fit for a candidate. Be strict and practical.
@@ -803,9 +817,15 @@ def api_status(payload: StatusIn):
 def api_shortlist_feedback(payload: ShortlistFeedbackIn):
     if payload.verdict not in {"keep", "remove"}:
         raise HTTPException(status_code=400, detail="Invalid verdict")
-    upsert_shortlist_feedback(payload.job_id, payload.verdict, payload.reason or "")
-    _auto_tune_from_shortlist(payload.job_id, payload.verdict, payload.reason or "")
-    return {"ok": True}
+    reason = (payload.reason or "").strip()
+    prev = get_shortlist_feedback(payload.job_id)
+    if prev and (prev.get("verdict") or "") == payload.verdict and (prev.get("reason") or "") == reason:
+        return {"ok": True, "tuned": False, "message": "No feedback change"}
+    upsert_shortlist_feedback(payload.job_id, payload.verdict, reason)
+    if payload.verdict == "remove" and not reason:
+        return {"ok": True, "tuned": False, "message": "Reason required for auto-tune on remove"}
+    _auto_tune_from_shortlist(payload.job_id, payload.verdict, reason)
+    return {"ok": True, "tuned": True}
 
 
 @app.post("/feedback/ai")
@@ -814,9 +834,12 @@ def api_ai_feedback(payload: AiEvalFeedbackIn):
         raise HTTPException(status_code=400, detail="Invalid bucket")
     if payload.reasoning_quality < 1 or payload.reasoning_quality > 5:
         raise HTTPException(status_code=400, detail="Reasoning quality must be 1-5")
+    prev = get_ai_eval_feedback(payload.job_id)
+    if prev and (prev.get("correct_bucket") or "") == payload.correct_bucket and int(prev.get("reasoning_quality") or 0) == payload.reasoning_quality:
+        return {"ok": True, "tuned": False, "message": "No feedback change"}
     upsert_ai_eval_feedback(payload.job_id, payload.correct_bucket, payload.reasoning_quality)
     _auto_tune_from_ai(payload.job_id, payload.correct_bucket)
-    return {"ok": True}
+    return {"ok": True, "tuned": True}
 
 
 @app.get("/settings")
@@ -836,7 +859,7 @@ def api_ai_estimate_cover_letter(payload: CoverLetterGenerateIn):
     job = get_job(payload.job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    resume = _load_json(_get_base_dir() / "resume_profile.json")
+    resume = _load_json(RESUME_PATH)
     model = (payload.model or COVER_LETTER_MODEL).strip() or COVER_LETTER_MODEL
     return _estimate_cover_letter(job, resume, payload, model)
 
@@ -909,7 +932,7 @@ def api_cover_letter_generate(payload: CoverLetterGenerateIn):
     job = get_job(payload.job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    resume = _load_json(_get_base_dir() / "resume_profile.json")
+    resume = _load_json(RESUME_PATH)
     model = (payload.model or COVER_LETTER_MODEL).strip() or COVER_LETTER_MODEL
     template_text = ""
     if payload.template_id:
@@ -1417,54 +1440,97 @@ def _save_json(path: Path, data: Dict[str, Any]) -> None:
 
 
 def _append_tuning_log(entry: Dict[str, Any]) -> None:
-    log_path = _get_base_dir() / "tuning_log.jsonl"
+    log_path = _artifact_path("tuning_log.jsonl")
+    log_path.parent.mkdir(parents=True, exist_ok=True)
     entry["ts"] = datetime.utcnow().isoformat() + "Z"
     log_path.open("a", encoding="utf-8").write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
+DESCRIPTION_TRUNCATE_MARKERS = [
+    "set alert for similar jobs",
+    "see more jobs like this",
+    "job search smarter with premium",
+    "looking for talent?",
+    "linkedin corporation",
+    "about the company",
+    "select language",
+]
+
+
+def _clean_description_for_tuning(text: str) -> str:
+    if not text:
+        return ""
+    lines = (text or "").splitlines()
+    kept: List[str] = []
+    for line in lines:
+        low = line.strip().lower()
+        if any(marker in low for marker in DESCRIPTION_TRUNCATE_MARKERS):
+            break
+        kept.append(line)
+    return "\n".join(kept).strip()[:8000]
+
+
+def _extract_salary_floor_usd(job: Dict[str, Any]) -> Optional[int]:
+    salary_hint = str(job.get("salary_hint") or "")
+    description = _clean_description_for_tuning(str(job.get("description") or ""))
+    text = f"{salary_hint}\n{description}"
+
+    hourly = re.findall(r"\$\s*([0-9]+(?:\.[0-9]+)?)\s*/\s*hr", text, flags=re.I)
+    annual_from_hourly = [int(float(v) * 2080) for v in hourly]
+
+    annual_k = re.findall(r"\$\s*([0-9]+(?:\.[0-9]+)?)\s*[kK]\b", text)
+    annual_k_vals = [int(float(v) * 1000) for v in annual_k]
+
+    annual_full = re.findall(r"\$\s*([0-9]{2,3}(?:,[0-9]{3})+)", text)
+    annual_full_vals = [int(v.replace(",", "")) for v in annual_full]
+
+    candidates = annual_from_hourly + annual_k_vals + annual_full_vals
+    if not candidates:
+        return None
+    return min(candidates)
+
+
 def _import_for_step(step: str) -> None:
-    base_dir = _get_base_dir()
     with RUN_STATE["lock"]:
         RUN_STATE["lines"].append(f"Importing {step} results into SQLite...")
     if step == "scout":
-        import_metadata(base_dir / "tier2_metadata.json")
+        import_metadata(_artifact_input_path("tier2_metadata.json"))
     elif step == "shortlist":
-        import_shortlist(base_dir / "tier2_shortlist.json")
+        import_shortlist(_artifact_input_path("tier2_shortlist.json"))
     elif step == "scrape":
-        import_full(base_dir / "tier2_full.json")
+        import_full(_artifact_input_path("tier2_full.json"))
     elif step == "eval":
-        import_scored(base_dir / "tier2_scored.json")
+        import_scored(_artifact_input_path("tier2_scored.json"))
     elif step == "sort":
         import_buckets(
             {
-                "apply": base_dir / "apply.json",
-                "review": base_dir / "review.json",
-                "skip": base_dir / "skip.json",
+                "apply": _artifact_input_path("apply.json"),
+                "review": _artifact_input_path("review.json"),
+                "skip": _artifact_input_path("skip.json"),
             }
         )
 
 
 def import_all(only_sources: Optional[List[str]] = None) -> Dict[str, Any]:
-    base_dir = _get_base_dir()
     counts: Dict[str, Any] = {}
 
     def want(name: str) -> bool:
         return not only_sources or name in only_sources
 
     if want("metadata"):
-        counts["metadata"] = import_metadata(base_dir / "tier2_metadata.json")
+        counts["metadata"] = import_metadata(_artifact_input_path("tier2_metadata.json"))
     if want("shortlist"):
-        counts["shortlist"] = import_shortlist(base_dir / "tier2_shortlist.json")
+        counts["shortlist"] = import_shortlist(_artifact_input_path("tier2_shortlist.json"))
     if want("full"):
-        counts["full"] = import_full(base_dir / "tier2_full.json")
+        counts["full"] = import_full(_artifact_input_path("tier2_full.json"))
     if want("scored"):
-        counts["scored"] = import_scored(base_dir / "tier2_scored.json")
+        counts["scored"] = import_scored(_artifact_input_path("tier2_scored.json"))
     if want("buckets"):
         counts["buckets"] = import_buckets(
             {
-                "apply": base_dir / "apply.json",
-                "review": base_dir / "review.json",
-                "skip": base_dir / "skip.json",
+                "apply": _artifact_input_path("apply.json"),
+                "review": _artifact_input_path("review.json"),
+                "skip": _artifact_input_path("skip.json"),
             }
         )
 
@@ -1654,73 +1720,52 @@ def _auto_tune_from_shortlist(job_id: int, verdict: str, reason: str) -> None:
     prefs = _load_json(PREFERENCES_PATH)
     rules = _load_json(RULES_PATH)
 
-    text = " ".join(
-        [
-            job.get("title", ""),
-            job.get("company", ""),
-            job.get("description", "") or "",
-            job.get("raw_card_text", "") or "",
-        ]
-    ).lower()
-
     changed = []
 
     def clamp(val: int, lo: int, hi: int) -> int:
         return max(lo, min(hi, val))
 
     reason = (reason or "").lower()
-
-    adjusted_min_match = False
+    q = prefs.get("qualification", {})
+    current_min_match = float(q.get("min_match_score", 0.55))
     if verdict == "remove":
+        if not reason:
+            return
         if "wrong field" in reason:
-            rules["wrong_field_penalty"] = clamp(int(rules.get("wrong_field_penalty", -6)) - 2, -30, -2)
+            rules["wrong_field_penalty"] = clamp(int(rules.get("wrong_field_penalty", -6)) - 1, -30, -2)
             changed.append({"rules.wrong_field_penalty": rules["wrong_field_penalty"]})
-        if "not qualified" in reason:
-            q = prefs.get("qualification", {})
-            q["min_match_score"] = round(min(0.85, max(0.35, float(q.get("min_match_score", 0.55)) + 0.03)), 2)
+        elif "not qualified" in reason:
+            q["min_match_score"] = round(min(0.85, max(0.35, current_min_match + 0.01)), 2)
             prefs["qualification"] = q
             changed.append({"preferences.qualification.min_match_score": q["min_match_score"]})
-            adjusted_min_match = True
-        if "salesy" in reason:
-            rules["sales_adjacent_penalty"] = clamp(int(rules.get("sales_adjacent_penalty", -8)) - 3, -30, -2)
-            changed.append({"rules.sales_adjacent_penalty": rules["sales_adjacent_penalty"]})
-        if "healthcare" in reason:
-            rules["healthcare_penalty"] = clamp(int(rules.get("healthcare_penalty", -10)) - 3, -30, -2)
-            changed.append({"rules.healthcare_penalty": rules["healthcare_penalty"]})
-        if "low pay" in reason:
-            q = prefs.get("qualification", {})
-            q["min_match_score"] = round(min(0.85, max(0.35, float(q.get("min_match_score", 0.55)) + 0.01)), 2)
-            prefs["qualification"] = q
-            changed.append({"preferences.qualification.min_match_score": q["min_match_score"]})
-            adjusted_min_match = True
-        if "onsite" in reason:
-            ws = rules.get("workplace_score", {})
-            ws["onsite"] = max(-10, int(ws.get("onsite", 8)) - 2)
-            rules["workplace_score"] = ws
-            changed.append({"rules.workplace_score.onsite": ws["onsite"]})
-            wp = prefs.get("workplace_preferences", {})
-            weights = wp.get("workplace_type_weight", {})
-            if "onsite" in weights:
-                weights["onsite"] = max(0.0, round(float(weights.get("onsite", 0.6)) - 0.05, 2))
-                wp["workplace_type_weight"] = weights
-                prefs["workplace_preferences"] = wp
-                changed.append({"preferences.workplace_type_weight.onsite": weights["onsite"]})
-
-        if any(t in text for t in ["health", "medical", "hospital", "clinic", "patient"]):
-            rules["healthcare_penalty"] = clamp(int(rules.get("healthcare_penalty", -10)) - 2, -30, -2)
-            changed.append({"rules.healthcare_penalty": rules["healthcare_penalty"]})
-        if any(t in text for t in ["sales", "account executive", "business development", "quota", "cold call"]):
+        elif "salesy" in reason:
             rules["sales_adjacent_penalty"] = clamp(int(rules.get("sales_adjacent_penalty", -8)) - 2, -30, -2)
             changed.append({"rules.sales_adjacent_penalty": rules["sales_adjacent_penalty"]})
-
-        if not adjusted_min_match:
-            q = prefs.get("qualification", {})
-            q["min_match_score"] = round(min(0.85, max(0.35, float(q.get("min_match_score", 0.55)) + 0.02)), 2)
+        elif "healthcare" in reason:
+            rules["healthcare_penalty"] = clamp(int(rules.get("healthcare_penalty", -10)) - 2, -30, -2)
+            changed.append({"rules.healthcare_penalty": rules["healthcare_penalty"]})
+        elif "low pay" in reason:
+            salary_floor = _extract_salary_floor_usd(job)
+            if salary_floor is not None:
+                hard = prefs.get("hard_constraints", {}) or {}
+                existing_floor = hard.get("min_base_salary_usd")
+                existing_floor_num = int(existing_floor) if existing_floor not in (None, "") else 0
+                new_floor = max(existing_floor_num, int(salary_floor) + 1000)
+                if new_floor > existing_floor_num:
+                    hard["min_base_salary_usd"] = new_floor
+                    prefs["hard_constraints"] = hard
+                    changed.append({"preferences.hard_constraints.min_base_salary_usd": new_floor})
+        elif "onsite" in reason:
+            ws = rules.get("workplace_score", {})
+            ws["onsite"] = max(-10, int(ws.get("onsite", 8)) - 1)
+            rules["workplace_score"] = ws
+            changed.append({"rules.workplace_score.onsite": ws["onsite"]})
+        else:
+            q["min_match_score"] = round(min(0.85, max(0.35, current_min_match + 0.01)), 2)
             prefs["qualification"] = q
             changed.append({"preferences.qualification.min_match_score": q["min_match_score"]})
     else:
-        q = prefs.get("qualification", {})
-        q["min_match_score"] = round(min(0.8, max(0.35, float(q.get("min_match_score", 0.55)) - 0.02)), 2)
+        q["min_match_score"] = round(min(0.85, max(0.35, current_min_match - 0.01)), 2)
         prefs["qualification"] = q
         changed.append({"preferences.qualification.min_match_score": q["min_match_score"]})
 

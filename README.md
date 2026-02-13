@@ -1,10 +1,43 @@
 # Job Finder Dashboard
 
-Local FastAPI + React app to run the pipeline, review jobs, rate them, and tune preferences.
+Local-first job intelligence pipeline with a FastAPI backend, React dashboard, and feedback-driven ranking loop.
 
-## Backend
+## Preview
 
-```
+![Job Finder Dashboard](docs/dashboard-preview.png)
+
+## Highlights
+
+- End-to-end pipeline: `scout -> shortlist -> scrape -> eval` (+ optional `sort`)
+- Unified operations UI for jobs, ratings, settings, pipeline runs, and cover letters
+- Local SQLite persistence with importable JSON/CSV artifacts
+- Feedback-to-tuning loop with guarded, idempotent behavior
+- Cost-aware AI eval and cover-letter generation tracking
+
+## Architecture
+
+Core services:
+- `backend/app.py`: API routes, pipeline orchestration, imports, tuning hooks
+- `backend/db.py`: SQLite schema + persistence access layer
+- `frontend/src/App.jsx`: single-page dashboard UI
+
+Pipeline scripts:
+- `job-scout.py`: LinkedIn job metadata capture
+- `shortlist.py`: rule + preference-based ranking
+- `deep-scrape-full.py`: full description scraping
+- `ai-eval.py`: structured AI fit analysis
+- `sort-results.py`: bucket into apply/review/skip
+
+Data boundaries:
+- Runtime data: `artifacts/`
+- Database: `artifacts/jobfinder.db`
+- Source/config: repo files (`backend/`, `frontend/`, root config JSON)
+
+## Quick Start
+
+Backend:
+
+```powershell
 cd backend
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -13,56 +46,95 @@ cd ..
 python run-backend.py
 ```
 
-## Frontend
+Frontend:
 
-```
+```powershell
 cd frontend
 npm install
 npm run dev
 ```
 
-Open http://localhost:5173
+Open `http://localhost:5173`.
 
-## Pipeline Sizes
+## Configuration
 
-Sizes control how many jobs are pulled, shortlisted, scraped, and evaluated.
+Environment variables:
+- `OPENAI_API_KEY`: required for AI eval and AI cover-letter generation
+- `VITE_API_BASE`: frontend API base URL (default `http://127.0.0.1:8001`)
+- `JOBFINDER_CHROME_PROFILE`: scraper browser profile directory
+- `JOBFINDER_VIEWPORT`: optional scraper viewport override as `WIDTHxHEIGHT` (example: `1280x1440`)
 
-- Large: 1000 / 120 / 50
-- Medium: 500 / 60 / 20
-- Small: 100 / 30 / 10
+Portability defaults:
+- If `JOBFINDER_CHROME_PROFILE` is unset, scripts use repo-local `chrome-profile/`
+- If `JOBFINDER_VIEWPORT` is unset, scrapers auto-size to half monitor width and full monitor height
 
-Where the numbers mean: `max_results / shortlist_k / final_top`.
+Frontend env setup:
 
-## AI Eval (Batching)
-
-`ai-eval.py` supports batching to reduce overhead per job:
-
+```powershell
+cd frontend
+copy .env.example .env
 ```
-python ai-eval.py --batch-size 5
-```
 
-Default batch size is 5. It evaluates jobs in order and writes `tier2_scored.json` after each batch.
+## Pipeline Sizing
 
-## Cover Letter Templates
+Size presets are `max_results / shortlist_k / final_top`:
+- Large: `1000 / 120 / 50`
+- Medium: `500 / 60 / 20`
+- Small: `100 / 30 / 10`
 
-- Templates live in `cover_letter_templates.json`.
-- The Cover Letters tab supports template selection and editing.
-- The date is normalized to `MMMM D, YYYY` during generation.
-- A header line equal to `Ruan` is replaced with the job’s company name.
+## Data Lifecycle
+
+Generated outputs (safe to reset):
+- `artifacts/tier2_metadata.json`
+- `artifacts/tier2_shortlist.json`
+- `artifacts/tier2_shortlist.csv`
+- `artifacts/tier2_full.json`
+- `artifacts/tier2_scored.json`
+- `artifacts/apply.json`, `artifacts/review.json`, `artifacts/skip.json`
+- `artifacts/*.csv` exports, logs, and cover-letter outputs
+- `artifacts/jobfinder.db`
+
+Persistent operator config:
+- `preferences.json`
+- `shortlist_rules.json`
+- `searches.json`
+- `resume_profile.json`
+- `cover_letter_templates.json`
+- `ai_pricing.json`
 
 ## AI Cost Tracking
 
-- Pricing lives in `ai_pricing.json`.
-- Usage is logged to `ai_usage.jsonl`, with rollups in `ai_usage_totals.json`.
-- Estimates are shown in the UI next to AI actions.
+- Pricing source: `ai_pricing.json`
+- Usage log: `artifacts/ai_usage.jsonl`
+- Rollups: `artifacts/ai_usage_totals.json`
 
-## Auto-Reload (Dev)
+## Troubleshooting
 
-`run-backend.py` now runs Uvicorn with `reload=True`. This auto-restarts the backend on file changes.
+Frontend cannot reach backend:
+- Start backend on `127.0.0.1:8001`
+- Or set `VITE_API_BASE` in `frontend/.env`
 
-Note: reload will restart any in-flight pipeline run.
+Scraper captures fewer jobs per page than expected:
+- Let auto viewport sizing run by default
+- Or force `JOBFINDER_VIEWPORT` to a known-good value
 
-## Notes
-- Uses SQLite database `jobfinder.db` in the project root.
-- Uses existing scripts (`job-scout.py`, `shortlist.py`, `deep-scrape-full.py`, `ai-eval.py`, `sort-results.py`).
-- AI eval requires `OPENAI_API_KEY` in your environment.
+Chrome profile lock error:
+- Close Chrome instances sharing the same profile
+- Or set `JOBFINDER_CHROME_PROFILE` to a dedicated folder
+
+AI calls fail:
+- Confirm `OPENAI_API_KEY` is exported in the backend shell
+
+## Quick Reset
+
+```powershell
+Remove-Item -Recurse -Force artifacts
+New-Item -ItemType Directory artifacts
+python run-backend.py
+```
+
+## Privacy
+
+- Treat `resume_profile.json`, `cover_letter_templates.json`, and browser profile data as private
+- Keep runtime artifacts out of commits
+- Sanitize local personal content before publishing the repository

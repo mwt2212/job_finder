@@ -2,23 +2,69 @@ import json
 import time
 import random
 import re
+import os
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 # ================== PATHS (FIXED) ==================
 BASE_DIR = Path(__file__).parent
+ARTIFACTS_DIR = BASE_DIR / "artifacts"
 
-SHORTLIST = BASE_DIR / "tier2_shortlist.json"
-OUTFILE = BASE_DIR / "tier2_full.json"
+OUTFILE = ARTIFACTS_DIR / "tier2_full.json"
 
-CHROME_PROFILE_PATH = r"C:\Users\Michael\Desktop\Job Finder\chrome-profile"
+CHROME_PROFILE_PATH = Path(
+    os.getenv("JOBFINDER_CHROME_PROFILE") or (BASE_DIR / "chrome-profile")
+).expanduser()
 
 # ================== VIEWPORT ==================
-VIEWPORT = {"width": 1280, "height": 1440}
+DEFAULT_VIEWPORT = {"width": 1280, "height": 1440}
 
 # ================== TIMING ==================
 def sleep(a, b):
     time.sleep(random.uniform(a, b))
+
+
+def _parse_viewport_override() -> dict | None:
+    raw = (os.getenv("JOBFINDER_VIEWPORT") or "").strip().lower()
+    if not raw:
+        return None
+    m = re.match(r"^\s*(\d{3,5})\s*[x,]\s*(\d{3,5})\s*$", raw)
+    if not m:
+        return None
+    w = int(m.group(1))
+    h = int(m.group(2))
+    if w < 600 or h < 600:
+        return None
+    return {"width": w, "height": h}
+
+
+def _resolve_viewport(page) -> dict:
+    override = _parse_viewport_override()
+    if override:
+        return override
+    # Prefer OS-level monitor size; Playwright's default emulated viewport
+    # can report 1280x720 before we set a real viewport.
+    try:
+        import ctypes
+
+        user32 = ctypes.windll.user32  # type: ignore[attr-defined]
+        sw = int(user32.GetSystemMetrics(0))
+        sh = int(user32.GetSystemMetrics(1))
+        if sw > 0 and sh > 0:
+            return {"width": max(900, sw // 2), "height": max(900, sh)}
+    except Exception:
+        pass
+    try:
+        dims = page.evaluate(
+            "() => ({w: window.screen.availWidth || window.screen.width || 0, h: window.screen.availHeight || window.screen.height || 0})"
+        )
+        sw = int((dims or {}).get("w") or 0)
+        sh = int((dims or {}).get("h") or 0)
+        if sw > 0 and sh > 0:
+            return {"width": max(900, sw // 2), "height": max(900, sh)}
+    except Exception:
+        pass
+    return DEFAULT_VIEWPORT
 
 # ================== EXTRACTION ==================
 def extract_job_description(page) -> str:
@@ -53,28 +99,37 @@ def extract_salary_hint(text: str) -> str:
     return m2.group(0) if m2 else ""
 
 # ================== MAIN ==================
+def artifact_input(name: str) -> Path:
+    artifact = ARTIFACTS_DIR / name
+    legacy = BASE_DIR / name
+    return artifact if artifact.exists() else legacy
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=0, help="Limit number of jobs to scrape")
     args = parser.parse_args()
 
-    if not SHORTLIST.exists():
-        raise FileNotFoundError(f"Missing input file: {SHORTLIST}")
-
-    shortlist = json.loads(SHORTLIST.read_text(encoding="utf-8"))
+    shortlist_path = artifact_input("tier2_shortlist.json")
+    if not shortlist_path.exists():
+        raise FileNotFoundError(f"Missing input file: {shortlist_path}")
+    shortlist = json.loads(shortlist_path.read_text(encoding="utf-8"))
+    ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
     if args.limit and args.limit > 0:
         shortlist = shortlist[: args.limit]
     results = []
 
     with sync_playwright() as p:
         context = p.chromium.launch_persistent_context(
-            user_data_dir=CHROME_PROFILE_PATH,
+            user_data_dir=str(CHROME_PROFILE_PATH),
             headless=False,
             args=["--start-maximized"]
         )
         page = context.new_page()
-        page.set_viewport_size(VIEWPORT)
+        viewport = _resolve_viewport(page)
+        page.set_viewport_size(viewport)
+        print(f"Viewport: {viewport['width']}x{viewport['height']}")
 
         try:
             for i, job in enumerate(shortlist, start=1):

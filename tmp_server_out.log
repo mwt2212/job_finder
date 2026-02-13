@@ -1,5 +1,0 @@
-Backend loaded from C:\Users\Michael\Desktop\Job Finder\backend\app.py
-GET /health -> 200
-INFO:     127.0.0.1:53984 - "GET /health HTTP/1.1" 200 OK
-GET /debug/env -> 200
-INFO:     127.0.0.1:53985 - "GET /debug/env HTTP/1.1" 200 OK

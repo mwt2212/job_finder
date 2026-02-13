@@ -19,10 +19,10 @@ from ai_usage import (
 
 # ================== PATHS (FIXED) ==================
 BASE_DIR = Path(__file__).parent
-INFILE = BASE_DIR / "tier2_full.json"
+ARTIFACTS_DIR = BASE_DIR / "artifacts"
 RESUME = BASE_DIR / "resume_profile.json"
 PREFS = BASE_DIR / "preferences.json"
-OUTFILE = BASE_DIR / "tier2_scored.json"
+OUTFILE = ARTIFACTS_DIR / "tier2_scored.json"
 
 client = OpenAI() if OpenAI else None
 
@@ -162,6 +162,12 @@ def _call_model(prompt: str, model: str, schema: dict) -> Tuple[str, Dict[str, A
     return resp["choices"][0]["message"]["content"] or "", (resp.get("usage") or {})
 
 
+def artifact_input(name: str) -> Path:
+    artifact = ARTIFACTS_DIR / name
+    legacy = BASE_DIR / name
+    return artifact if artifact.exists() else legacy
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser()
@@ -170,12 +176,14 @@ def main():
     parser.add_argument("--model", type=str, default="", help="Model override")
     args = parser.parse_args()
 
-    if not INFILE.exists():
-        raise FileNotFoundError(f"Missing input file: {INFILE}")
+    infile = artifact_input("tier2_full.json")
+    if not infile.exists():
+        raise FileNotFoundError(f"Missing input file: {infile}")
     if not RESUME.exists():
         raise FileNotFoundError(f"Missing resume file: {RESUME}")
 
-    jobs = json.loads(INFILE.read_text(encoding="utf-8"))
+    jobs = json.loads(infile.read_text(encoding="utf-8"))
+    ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
     if args.limit and args.limit > 0:
         jobs = jobs[: args.limit]
     resume = json.loads(RESUME.read_text(encoding="utf-8"))

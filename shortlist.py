@@ -3,10 +3,10 @@ import re
 from pathlib import Path
 
 BASE_DIR = Path(__file__).parent
+ARTIFACTS_DIR = BASE_DIR / "artifacts"
 
-INFILE = BASE_DIR / "tier2_metadata.json"
-OUTFILE = BASE_DIR / "tier2_shortlist.json"
-OUTCSV = BASE_DIR / "tier2_shortlist.csv"
+OUTFILE = ARTIFACTS_DIR / "tier2_shortlist.json"
+OUTCSV = ARTIFACTS_DIR / "tier2_shortlist.csv"
 RULES_FILE = BASE_DIR / "shortlist_rules.json"
 PREFS_FILE = BASE_DIR / "preferences.json"
 RESUME_FILE = BASE_DIR / "resume_profile.json"
@@ -19,6 +19,12 @@ def load_json(path: Path, default):
     if path.exists():
         return json.loads(path.read_text(encoding="utf-8"))
     return default
+
+
+def artifact_input(name: str) -> Path:
+    artifact = ARTIFACTS_DIR / name
+    legacy = BASE_DIR / name
+    return artifact if artifact.exists() else legacy
 
 
 def norm(s: str) -> str:
@@ -154,7 +160,10 @@ def main():
     prefs = load_json(PREFS_FILE, {})
     resume = load_json(RESUME_FILE, {})
 
-    data = json.loads(Path(INFILE).read_text(encoding="utf-8"))
+    infile = artifact_input("tier2_metadata.json")
+    if not infile.exists():
+        raise FileNotFoundError(f"Missing input file: {infile}")
+    data = json.loads(infile.read_text(encoding="utf-8"))
 
     hard_reject = rules.get("hard_reject_patterns", [])
     not_entry = rules.get("not_entry_level_patterns", [])
@@ -273,8 +282,9 @@ def main():
         remaining = target_n - len(shortlist)
         shortlist.extend(scored[len(shortlist):len(shortlist) + remaining])
 
-    Path(OUTFILE).write_text(json.dumps(shortlist, ensure_ascii=False, indent=2), encoding="utf-8")
-    to_csv(shortlist, Path(OUTCSV))
+    ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+    OUTFILE.write_text(json.dumps(shortlist, ensure_ascii=False, indent=2), encoding="utf-8")
+    to_csv(shortlist, OUTCSV)
 
     print(f"Input jobs: {len(data)}")
     print(f"Scored (kept): {len(scored)}")
