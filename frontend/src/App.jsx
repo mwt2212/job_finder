@@ -1857,6 +1857,7 @@ export default function App() {
             <div className="field">
               <label>Size</label>
               <select value={sizePreset} onChange={(e) => setSizePreset(e.target.value)}>
+                <option value="Test">Test (1 / 1 / 1)</option>
                 <option value="Large">Large (1000 / 120 / 50)</option>
                 <option value="Medium">Medium (500 / 60 / 20)</option>
                 <option value="Small">Small (100 / 30 / 10)</option>

@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -48,6 +49,14 @@ from backend.db import (
     list_cover_letters,
     get_cover_letter,
 )
+from backend.onboarding_validate import (
+    linkedin_url_for_search,
+    validate_all,
+    validate_preferences,
+    validate_resume_profile,
+    validate_searches,
+    validate_shortlist_rules,
+)
 
 try:
     from openai import OpenAI  # type: ignore
@@ -61,8 +70,11 @@ def _get_base_dir() -> Path:
 BASE_DIR = _get_base_dir()
 ARTIFACTS_DIR = BASE_DIR / "artifacts"
 PREFERENCES_PATH = BASE_DIR / "preferences.json"
+PREFERENCES_EXAMPLE_PATH = BASE_DIR / "preferences.example.json"
 RULES_PATH = BASE_DIR / "shortlist_rules.json"
+RULES_EXAMPLE_PATH = BASE_DIR / "shortlist_rules.example.json"
 SEARCHES_PATH = BASE_DIR / "searches.json"
+SEARCHES_EXAMPLE_PATH = BASE_DIR / "searches.example.json"
 TEMPLATES_LOCAL_PATH = BASE_DIR / "cover_letter_templates.local.json"
 TEMPLATES_PATH = BASE_DIR / "cover_letter_templates.json"
 TEMPLATES_EXAMPLE_PATH = BASE_DIR / "cover_letter_templates.example.json"
@@ -119,6 +131,264 @@ def _templates_write_path() -> Path:
 def _script_path(step: str) -> Path:
     return _get_base_dir() / SCRIPT_NAMES[step]
 
+
+def _default_preferences() -> Dict[str, Any]:
+    return {
+        "search_filters": {"location_city": "", "radius_miles": 10, "posted_within_hours": 24},
+        "hard_constraints": {"min_base_salary_usd": None},
+        "qualification": {"min_match_score": 0.55},
+    }
+
+
+def _default_shortlist_rules() -> Dict[str, Any]:
+    return {
+        "workplace_score": {"remote": 10, "hybrid": 12, "onsite": 6, "unknown": 2},
+        "sales_adjacent_penalty": -10,
+        "healthcare_penalty": -10,
+        "wrong_field_penalty": -8,
+    }
+
+
+def _default_searches() -> Dict[str, Any]:
+    location = "Chicago, IL"
+    return {
+        "Chicago": {
+            "url": linkedin_url_for_search("Chicago", location),
+            "location_label": location,
+        }
+    }
+
+
+def _write_if_missing(path: Path, payload: Dict[str, Any]) -> bool:
+    if path.exists():
+        return False
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return True
+
+
+def _copy_if_missing(path: Path, template_path: Path) -> bool:
+    if path.exists() or not template_path.exists():
+        return False
+    path.write_text(template_path.read_text(encoding="utf-8"), encoding="utf-8")
+    return True
+
+
+def _seed_local_if_missing(local_path: Path, primary_path: Path, example_path: Path) -> str:
+    if local_path.exists():
+        return ""
+    if primary_path.exists():
+        local_path.write_text(primary_path.read_text(encoding="utf-8"), encoding="utf-8")
+        return str(primary_path)
+    if example_path.exists():
+        local_path.write_text(example_path.read_text(encoding="utf-8"), encoding="utf-8")
+        return str(example_path)
+    return ""
+
+
+def _bootstrap_required_files() -> Dict[str, Any]:
+    created: List[str] = []
+    copied_from_examples: List[str] = []
+
+    ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    resume_seed = _seed_local_if_missing(RESUME_LOCAL_PATH, RESUME_PATH, RESUME_EXAMPLE_PATH)
+    if resume_seed:
+        created.append(str(RESUME_LOCAL_PATH))
+        copied_from_examples.append(resume_seed)
+
+    templates_seed = _seed_local_if_missing(TEMPLATES_LOCAL_PATH, TEMPLATES_PATH, TEMPLATES_EXAMPLE_PATH)
+    if templates_seed:
+        created.append(str(TEMPLATES_LOCAL_PATH))
+        copied_from_examples.append(templates_seed)
+
+    if _copy_if_missing(PREFERENCES_PATH, PREFERENCES_EXAMPLE_PATH):
+        created.append(str(PREFERENCES_PATH))
+        copied_from_examples.append(str(PREFERENCES_EXAMPLE_PATH))
+    elif _write_if_missing(PREFERENCES_PATH, _default_preferences()):
+        created.append(str(PREFERENCES_PATH))
+
+    if _copy_if_missing(RULES_PATH, RULES_EXAMPLE_PATH):
+        created.append(str(RULES_PATH))
+        copied_from_examples.append(str(RULES_EXAMPLE_PATH))
+    elif _write_if_missing(RULES_PATH, _default_shortlist_rules()):
+        created.append(str(RULES_PATH))
+
+    if _copy_if_missing(SEARCHES_PATH, SEARCHES_EXAMPLE_PATH):
+        created.append(str(SEARCHES_PATH))
+        copied_from_examples.append(str(SEARCHES_EXAMPLE_PATH))
+    elif _write_if_missing(SEARCHES_PATH, _default_searches()):
+        created.append(str(SEARCHES_PATH))
+
+    return {
+        "ok": True,
+        "created": created,
+        "copied_from_examples": copied_from_examples,
+        "artifacts_dir": str(ARTIFACTS_DIR),
+    }
+
+
+def _resolve_chrome_profile() -> Path:
+    return Path(os.getenv("JOBFINDER_CHROME_PROFILE") or (BASE_DIR / "chrome-profile")).expanduser()
+
+
+def _is_linkedin_login_required(page: Any) -> bool:
+    url = (page.url or "").lower()
+    if "linkedin.com/login" in url or "linkedin.com/checkpoint" in url:
+        return True
+    try:
+        if page.locator('input[name="session_key"]').count() > 0:
+            return True
+        if page.locator('a[href*="/login"]').count() > 0 and page.locator("text=Sign in").count() > 0:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _check_playwright_runtime() -> Dict[str, Any]:
+    try:
+        from playwright.sync_api import sync_playwright  # type: ignore
+    except Exception as exc:
+        return {
+            "ok": False,
+            "message": f"Playwright import failed: {exc}",
+            "fix_hint": "Install backend dependencies and run `python -m playwright install chromium`.",
+        }
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.goto("about:blank", wait_until="load", timeout=10000)
+            browser.close()
+    except Exception as exc:
+        return {
+            "ok": False,
+            "message": f"Playwright browser launch failed: {exc}",
+            "fix_hint": "Run `python -m playwright install chromium` and ensure browser binaries are accessible.",
+        }
+
+    return {"ok": True, "message": "Playwright/browser dependency is available.", "fix_hint": ""}
+
+
+def _check_linkedin_session() -> Dict[str, Any]:
+    profile = _resolve_chrome_profile()
+    if not profile.exists():
+        return {
+            "ok": False,
+            "message": f"Chrome profile path does not exist: {profile}",
+            "fix_hint": "Run `python setup-linkedin-profile.py` and sign in to LinkedIn once.",
+        }
+
+    try:
+        from playwright.sync_api import sync_playwright  # type: ignore
+    except Exception as exc:
+        return {
+            "ok": False,
+            "message": f"Playwright import failed: {exc}",
+            "fix_hint": "Install backend dependencies and run `python -m playwright install chromium`.",
+        }
+
+    try:
+        with sync_playwright() as p:
+            context = p.chromium.launch_persistent_context(
+                user_data_dir=str(profile),
+                headless=True,
+                args=["--no-sandbox"],
+            )
+            page = context.new_page()
+            page.goto("https://www.linkedin.com/jobs/search/", wait_until="domcontentloaded", timeout=30000)
+            login_required = _is_linkedin_login_required(page)
+            context.close()
+            if login_required:
+                return {
+                    "ok": False,
+                    "message": "LinkedIn login required for the configured profile.",
+                    "fix_hint": "Run `python setup-linkedin-profile.py`, sign in, then retry preflight.",
+                }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "message": f"Unable to verify LinkedIn session: {exc}",
+            "fix_hint": "Close Chrome windows using this profile and rerun `python setup-linkedin-profile.py`.",
+        }
+
+    return {"ok": True, "message": "LinkedIn session check passed.", "fix_hint": ""}
+
+
+def _build_check(check_id: str, ok: bool, message: str, fix_hint: str = "", warn: bool = False) -> Dict[str, str]:
+    status = "pass" if ok else ("warn" if warn else "fail")
+    return {"id": check_id, "status": status, "message": message, "fix_hint": fix_hint}
+
+
+def _onboarding_validation_snapshot() -> Dict[str, Any]:
+    resume_data = _load_resume_profile()
+    preferences_data = _load_json(PREFERENCES_PATH)
+    rules_data = _load_json(RULES_PATH)
+    searches_data = _load_json(SEARCHES_PATH)
+    return validate_all(resume_data, preferences_data, rules_data, searches_data)
+
+
+def _onboarding_status_payload() -> Dict[str, Any]:
+    checks: List[Dict[str, str]] = []
+    openai_key_present = bool((os.getenv("OPENAI_API_KEY") or "").strip())
+    checks.append(
+        _build_check(
+            "openai_api_key",
+            openai_key_present,
+            "OPENAI_API_KEY is set." if openai_key_present else "OPENAI_API_KEY is missing.",
+            "Set OPENAI_API_KEY in your environment before running AI-eval and cover letter features.",
+        )
+    )
+
+    profile_path = _resolve_chrome_profile()
+    profile_exists = profile_path.exists()
+    checks.append(
+        _build_check(
+            "linkedin_profile_path",
+            profile_exists,
+            f"LinkedIn profile directory found at {profile_path}."
+            if profile_exists
+            else f"LinkedIn profile directory is missing: {profile_path}",
+            "Run `python setup-linkedin-profile.py` to initialize a dedicated profile.",
+        )
+    )
+
+    writable = True
+    write_error = ""
+    try:
+        ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+        probe = ARTIFACTS_DIR / ".onboarding_write_probe"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+    except Exception as exc:
+        writable = False
+        write_error = str(exc)
+    checks.append(
+        _build_check(
+            "artifacts_write_access",
+            writable,
+            "Artifacts directory is writable." if writable else f"Artifacts directory is not writable: {write_error}",
+            "Grant write permissions to the repository and artifacts directory.",
+        )
+    )
+
+    validation = _onboarding_validation_snapshot()
+    checks.append(
+        _build_check(
+            "config_validation",
+            bool(validation.get("ok")),
+            "Required config files validate." if validation.get("ok") else "One or more config files failed validation.",
+            "Use the onboarding validation details to fix config fields.",
+        )
+    )
+
+    return {
+        "ready": all(c["status"] == "pass" for c in checks),
+        "checks": checks,
+        "validation": validation,
+    }
+
 app = FastAPI(title="Job Finder Dashboard")
 
 app.add_middleware(
@@ -145,6 +415,7 @@ RUN_STATE = {
 }
 
 SIZE_PRESETS = {
+    "Test": {"max_results": 1, "shortlist_k": 1, "final_top": 1},
     "Large": {"max_results": 1000, "shortlist_k": 120, "final_top": 50},
     "Medium": {"max_results": 500, "shortlist_k": 60, "final_top": 20},
     "Small": {"max_results": 100, "shortlist_k": 30, "final_top": 10},
@@ -876,6 +1147,106 @@ def api_get_settings():
     prefs = _load_json(PREFERENCES_PATH)
     rules = _load_json(RULES_PATH)
     return {"preferences": prefs, "rules": rules}
+
+
+@app.post("/onboarding/bootstrap")
+def api_onboarding_bootstrap():
+    return _bootstrap_required_files()
+
+
+@app.get("/onboarding/status")
+def api_onboarding_status():
+    return _onboarding_status_payload()
+
+
+@app.post("/onboarding/validate/resume-profile")
+def api_onboarding_validate_resume_profile(payload: Dict[str, Any]):
+    ok, errors, warnings = validate_resume_profile(payload or {})
+    return {"ok": ok, "errors": errors, "warnings": warnings}
+
+
+@app.post("/onboarding/validate/preferences")
+def api_onboarding_validate_preferences(payload: Dict[str, Any]):
+    ok, errors, warnings = validate_preferences(payload or {})
+    return {"ok": ok, "errors": errors, "warnings": warnings}
+
+
+@app.post("/onboarding/validate/shortlist-rules")
+def api_onboarding_validate_shortlist_rules(payload: Dict[str, Any]):
+    ok, errors, warnings = validate_shortlist_rules(payload or {})
+    return {"ok": ok, "errors": errors, "warnings": warnings}
+
+
+@app.post("/onboarding/validate/searches")
+def api_onboarding_validate_searches(payload: Any):
+    ok, errors, warnings = validate_searches(payload)
+    return {"ok": ok, "errors": errors, "warnings": warnings}
+
+
+@app.post("/onboarding/preflight")
+def api_onboarding_preflight():
+    checks: List[Dict[str, str]] = []
+
+    openai_key_present = bool((os.getenv("OPENAI_API_KEY") or "").strip())
+    checks.append(
+        _build_check(
+            "openai_api_key",
+            openai_key_present,
+            "OPENAI_API_KEY is set." if openai_key_present else "OPENAI_API_KEY is missing.",
+            "Set OPENAI_API_KEY in your environment and restart backend.",
+        )
+    )
+
+    writable = True
+    write_error = ""
+    try:
+        ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+        probe = ARTIFACTS_DIR / ".preflight_write_probe"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+    except Exception as exc:
+        writable = False
+        write_error = str(exc)
+    checks.append(
+        _build_check(
+            "filesystem_writable",
+            writable,
+            "Required paths are writable." if writable else f"Cannot write required paths: {write_error}",
+            "Ensure this repo path is writable and not locked by another process.",
+        )
+    )
+
+    validation = _onboarding_validation_snapshot()
+    checks.append(
+        _build_check(
+            "config_validation",
+            bool(validation.get("ok")),
+            "Required configs are valid." if validation.get("ok") else "One or more config files failed validation.",
+            "Fix validation errors for resume_profile, preferences, shortlist_rules, and searches.",
+        )
+    )
+
+    playwright_check = _check_playwright_runtime()
+    checks.append(
+        _build_check(
+            "playwright_runtime",
+            bool(playwright_check.get("ok")),
+            playwright_check.get("message", ""),
+            playwright_check.get("fix_hint", ""),
+        )
+    )
+
+    linkedin_check = _check_linkedin_session()
+    checks.append(
+        _build_check(
+            "linkedin_session",
+            bool(linkedin_check.get("ok")),
+            linkedin_check.get("message", ""),
+            linkedin_check.get("fix_hint", ""),
+        )
+    )
+
+    return {"ready": all(c["status"] == "pass" for c in checks), "checks": checks, "validation": validation}
 
 
 @app.get("/ai/pricing")
