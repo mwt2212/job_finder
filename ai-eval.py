@@ -21,7 +21,9 @@ from text_cleaning import clean_job_description
 # ================== PATHS (FIXED) ==================
 BASE_DIR = Path(__file__).parent
 ARTIFACTS_DIR = BASE_DIR / "artifacts"
+RESUME_LOCAL = BASE_DIR / "resume_profile.local.json"
 RESUME = BASE_DIR / "resume_profile.json"
+RESUME_EXAMPLE = BASE_DIR / "resume_profile.example.json"
 PREFS = BASE_DIR / "preferences.json"
 OUTFILE = ARTIFACTS_DIR / "tier2_scored.json"
 
@@ -169,6 +171,14 @@ def artifact_input(name: str) -> Path:
     return artifact if artifact.exists() else legacy
 
 
+def resolve_resume_path() -> Path:
+    if RESUME_LOCAL.exists():
+        return RESUME_LOCAL
+    if RESUME.exists():
+        return RESUME
+    return RESUME_EXAMPLE
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser()
@@ -180,14 +190,15 @@ def main():
     infile = artifact_input("tier2_full.json")
     if not infile.exists():
         raise FileNotFoundError(f"Missing input file: {infile}")
-    if not RESUME.exists():
-        raise FileNotFoundError(f"Missing resume file: {RESUME}")
+    resume_path = resolve_resume_path()
+    if not resume_path.exists():
+        raise FileNotFoundError(f"Missing resume file: {resume_path}")
 
     jobs = json.loads(infile.read_text(encoding="utf-8"))
     ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
     if args.limit and args.limit > 0:
         jobs = jobs[: args.limit]
-    resume = json.loads(RESUME.read_text(encoding="utf-8"))
+    resume = json.loads(resume_path.read_text(encoding="utf-8"))
     prefs = json.loads(PREFS.read_text(encoding="utf-8")) if PREFS.exists() else {}
 
     pricing = load_pricing()

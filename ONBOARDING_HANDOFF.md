@@ -51,6 +51,13 @@ LinkedIn setup aid already implemented:
 Artifacts boundary:
 - Runtime outputs now under `artifacts/`
 
+Config privacy split (already implemented for two files):
+- Resume/profile loading precedence is now:
+  - `resume_profile.local.json` -> `resume_profile.json` -> `resume_profile.example.json`
+- Cover-letter template loading precedence is now:
+  - `cover_letter_templates.local.json` -> `cover_letter_templates.json` -> `cover_letter_templates.example.json`
+- Local files are gitignored and intended to hold personal data.
+
 ---
 
 ## User-Specific Inputs Required For Correct Behavior
@@ -62,10 +69,11 @@ A user must have all of these configured:
 - Valid LinkedIn session in dedicated Chrome profile (`JOBFINDER_CHROME_PROFILE`)
 
 2. Personalization config
-- `resume_profile.json`
+- `resume_profile.local.json` (preferred) or fallback chain
 - `preferences.json`
 - `shortlist_rules.json`
 - `searches.json`
+- `cover_letter_templates.local.json` (for personalized templates)
 
 3. Runtime prerequisites
 - Python dependencies installed (`backend/requirements.txt`)
@@ -87,15 +95,18 @@ Implement a guided onboarding system with:
 - Job preferences capture
 - Search/location setup
 - Review + save
+- Natural-language profile builder (plain English to config draft)
 
 2. Backend onboarding endpoints
 - Status/readiness summary
 - Validation endpoints for each config block
 - Save endpoints
 - Preflight verifier endpoint
+- AI-assisted profile draft endpoint
+- Search/city CRUD endpoints
 
 3. Config bootstrap + migration
-- Generate missing JSON from templates/defaults
+- Generate missing JSON from templates/defaults on first run
 - Schema versioning in each config
 - Migration path for old versions
 
@@ -111,10 +122,11 @@ Implement a guided onboarding system with:
 ## Recommended New Files
 
 Config templates/examples:
-- `config_examples/resume_profile.example.json`
-- `config_examples/preferences.example.json`
-- `config_examples/shortlist_rules.example.json`
-- `config_examples/searches.example.json`
+- `resume_profile.example.json` (already exists)
+- `cover_letter_templates.example.json` (already exists)
+- `preferences.example.json` (recommended to add)
+- `shortlist_rules.example.json` (recommended to add)
+- `searches.example.json` (recommended to add)
 
 Validation/migration:
 - `backend/onboarding_schema.py`
@@ -123,6 +135,7 @@ Validation/migration:
 
 Optional local-only convention (future-safe):
 - `resume_profile.local.json`
+- `cover_letter_templates.local.json`
 - `preferences.local.json`
 - `shortlist_rules.local.json`
 - `searches.local.json`
@@ -131,6 +144,10 @@ Then add loader precedence:
 1. `*.local.json`
 2. normal file (`*.json`)
 3. example/default
+
+Status:
+- Resume/templates precedence is done.
+- Preferences/rules/searches local precedence is still pending.
 
 ---
 
@@ -149,6 +166,27 @@ Profile and preferences:
 - `PUT /onboarding/config/shortlist-rules`
 - `PUT /onboarding/config/searches`
 
+Natural-language profile draft:
+- `POST /onboarding/profile-draft`
+  - Input: free-text goals/preferences/background
+  - Output: structured draft for:
+    - `resume_profile`
+    - `preferences`
+    - `shortlist_rules` (safe defaults + inferred adjustments)
+    - `searches` seed suggestions
+  - Must return confidence + missing-fields prompts
+
+Search and city management:
+- `GET /onboarding/searches`
+- `POST /onboarding/searches`
+- `PUT /onboarding/searches/{label}`
+- `DELETE /onboarding/searches/{label}`
+  - Keep user-friendly fields:
+    - `label`
+    - `location_label`
+    - optional keywords
+    - generated LinkedIn URL
+
 LinkedIn/session checks:
 - `POST /onboarding/linkedin/init` (optional wrapper around setup script guidance)
 - `GET /onboarding/linkedin/status` (login/session check)
@@ -156,6 +194,11 @@ LinkedIn/session checks:
 Readiness:
 - `POST /onboarding/preflight`
   - Returns structured checks: pass/warn/fail with fix suggestions
+
+Bootstrap:
+- `POST /onboarding/bootstrap`
+  - Ensures all required user-local files exist (copy from examples/defaults when missing)
+  - Returns created/copied file list
 
 Schema/migrations:
 - `POST /onboarding/migrate`
@@ -169,6 +212,7 @@ Create onboarding flow in UI (new tab or modal):
 Step 1: Environment
 - Detect backend connectivity
 - Show API key presence status (boolean only, never reveal secret)
+- Run bootstrap endpoint to create any missing local config skeletons
 
 Step 2: LinkedIn Session
 - Explain dedicated profile behavior
@@ -180,15 +224,33 @@ Step 3: Resume/Profile
 - Optional: resume upload/parsing later
 - Show validation errors inline
 
+Step 3A: Plain-English Intake (new)
+- Text box: "Describe your background and what you want in your next job"
+- Guided helper prompts for missing essentials:
+  - preferred roles
+  - industries to avoid/prefer
+  - salary expectations
+  - workplace preference
+  - location constraints
+  - red flags (e.g., cold-calling heavy)
+- "Generate draft profile" action calls `/onboarding/profile-draft`
+- Show draft JSON + editable form before save
+- Do not auto-save without user confirmation
+
 Step 4: Preferences
 - Salary floor, remote/hybrid/onsite handling, no-cold-calling, industry penalties
 
 Step 5: Search Setup
 - At least one search entry in `searches.json` with label/url/location
+- Include simple "Add city/search" UI:
+  - city/location input
+  - optional keywords
+  - auto-generate URL
+  - edit/delete existing searches
 
 Step 6: Review & Save
 - Show normalized JSON preview
-- Save all configs
+- Save all configs to local files where applicable
 
 Step 7: Preflight + First Run
 - Run preflight and block pipeline start if critical checks fail
@@ -212,6 +274,8 @@ Step 7: Preflight + First Run
 
 `searches`:
 - At least one search object with `label`, `url`, `location_label`
+- No duplicate labels
+- URL should include expected LinkedIn jobs search shape
 
 Global:
 - Unknown keys logged as warnings (not hard fail initially)
@@ -238,6 +302,7 @@ Hard fail:
 - Required config passes validation
 - `OPENAI_API_KEY` is present
 - LinkedIn session check passes
+- Playwright/browser dependency is available
 
 Warn only:
 - Missing optional fields
@@ -258,6 +323,7 @@ Run this checklist before marking onboarding complete:
 - Remove local config and artifacts
 - Follow README + onboarding only
 - Confirm no manual JSON editing needed
+- Confirm no manual code edits or path edits needed
 
 2. First-run wizard
 - Completes all steps without backend exceptions
@@ -271,6 +337,7 @@ Run this checklist before marking onboarding complete:
 - Run `Small` pipeline from UI
 - Scout/shortlist/scrape/eval complete
 - Results populate jobs table
+- New run descriptions are cleaned (no common LinkedIn boilerplate tails)
 
 5. Reload persistence
 - Restart backend/frontend
@@ -279,16 +346,40 @@ Run this checklist before marking onboarding complete:
 6. Regression checks
 - Existing non-onboarded users still supported via fallback defaults
 - No break in current pipeline scripts
+- Existing users with `.local` files keep behavior unchanged
 
 ---
 
 ## Suggested Implementation Order (Concrete)
 
-1. Build backend validation + status + preflight endpoints
-2. Add config templates and loader/migration layer
-3. Add frontend onboarding wizard (basic version)
-4. Wire preflight gating into pipeline start UI
-5. Add polish: inline fix links, better copy, optional resume parsing
+1. Add missing example files (`preferences.example.json`, `shortlist_rules.example.json`, `searches.example.json`)
+2. Build backend bootstrap + validation + status + preflight endpoints
+3. Add loader precedence for `preferences/rules/searches` to support `.local` chain
+4. Add config migration layer
+5. Add frontend onboarding wizard (basic version)
+6. Wire preflight gating into pipeline start UI
+7. Add polish: inline fix links, better copy, optional resume parsing
+
+---
+
+## Product Acceptance Criteria (Out-Of-Box)
+
+For "download, follow simple instructions, and use effectively":
+
+- New user can clone + install deps + start backend/frontend without editing source.
+- On first launch, onboarding flow guides setup in under ~10 minutes.
+- User does not need to hand-edit JSON files.
+- User can describe preferences in plain English and get a usable draft profile.
+- User can complete LinkedIn session setup once, then pipeline reuses it.
+- User can add/edit/remove cities/searches from UI without touching JSON.
+- After onboarding, `Small` pipeline runs successfully and returns usable ranked jobs.
+- Preflight clearly blocks and explains missing prerequisites.
+- Existing advanced users can still override via `.local` files and env vars.
+
+Quality bar for profile-draft step:
+- If confidence is low, system asks targeted follow-up questions instead of forcing weak defaults.
+- Draft must be editable before save.
+- Final saved config must pass all validators.
 
 ---
 

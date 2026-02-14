@@ -9,7 +9,9 @@ OUTFILE = ARTIFACTS_DIR / "tier2_shortlist.json"
 OUTCSV = ARTIFACTS_DIR / "tier2_shortlist.csv"
 RULES_FILE = BASE_DIR / "shortlist_rules.json"
 PREFS_FILE = BASE_DIR / "preferences.json"
+RESUME_LOCAL_FILE = BASE_DIR / "resume_profile.local.json"
 RESUME_FILE = BASE_DIR / "resume_profile.json"
+RESUME_EXAMPLE_FILE = BASE_DIR / "resume_profile.example.json"
 
 # -----------------------
 # Helpers
@@ -25,6 +27,14 @@ def artifact_input(name: str) -> Path:
     artifact = ARTIFACTS_DIR / name
     legacy = BASE_DIR / name
     return artifact if artifact.exists() else legacy
+
+
+def resolve_resume_path() -> Path:
+    if RESUME_LOCAL_FILE.exists():
+        return RESUME_LOCAL_FILE
+    if RESUME_FILE.exists():
+        return RESUME_FILE
+    return RESUME_EXAMPLE_FILE
 
 
 def norm(s: str) -> str:
@@ -158,7 +168,7 @@ def main():
 
     rules = load_json(RULES_FILE, {})
     prefs = load_json(PREFS_FILE, {})
-    resume = load_json(RESUME_FILE, {})
+    resume = load_json(resolve_resume_path(), {})
 
     infile = artifact_input("tier2_metadata.json")
     if not infile.exists():

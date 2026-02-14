@@ -63,8 +63,12 @@ ARTIFACTS_DIR = BASE_DIR / "artifacts"
 PREFERENCES_PATH = BASE_DIR / "preferences.json"
 RULES_PATH = BASE_DIR / "shortlist_rules.json"
 SEARCHES_PATH = BASE_DIR / "searches.json"
+TEMPLATES_LOCAL_PATH = BASE_DIR / "cover_letter_templates.local.json"
 TEMPLATES_PATH = BASE_DIR / "cover_letter_templates.json"
+TEMPLATES_EXAMPLE_PATH = BASE_DIR / "cover_letter_templates.example.json"
+RESUME_LOCAL_PATH = BASE_DIR / "resume_profile.local.json"
 RESUME_PATH = BASE_DIR / "resume_profile.json"
+RESUME_EXAMPLE_PATH = BASE_DIR / "resume_profile.example.json"
 
 SCRIPT_NAMES = {
     "scout": "job-scout.py",
@@ -88,6 +92,28 @@ def _artifact_input_path(name: str) -> Path:
     artifact = _artifact_path(name)
     legacy = BASE_DIR / name
     return artifact if artifact.exists() else legacy
+
+
+def _first_existing_path(*paths: Path) -> Optional[Path]:
+    for path in paths:
+        if path.exists():
+            return path
+    return None
+
+
+def _load_resume_profile() -> Dict[str, Any]:
+    path = _first_existing_path(RESUME_LOCAL_PATH, RESUME_PATH, RESUME_EXAMPLE_PATH)
+    if not path:
+        return {}
+    return _load_json(path)
+
+
+def _templates_read_path() -> Optional[Path]:
+    return _first_existing_path(TEMPLATES_LOCAL_PATH, TEMPLATES_PATH, TEMPLATES_EXAMPLE_PATH)
+
+
+def _templates_write_path() -> Path:
+    return TEMPLATES_LOCAL_PATH
 
 
 def _script_path(step: str) -> Path:
@@ -600,7 +626,7 @@ def _estimate_ai_eval(size: str, model_override: Optional[str] = None) -> Dict[s
     job_count = final_top
     avg_desc_chars = 4800
 
-    resume = _load_json(RESUME_PATH)
+    resume = _load_resume_profile()
     prefs = _load_json(PREFERENCES_PATH)
     base_prompt = f"""
 You are evaluating job fit for a candidate. Be strict and practical.
@@ -673,7 +699,7 @@ def _estimate_ai_eval_from_file(model_override: Optional[str] = None) -> Dict[st
     if desc_lengths:
         avg_desc_chars = int(sum(desc_lengths) / len(desc_lengths))
 
-    resume = _load_json(RESUME_PATH)
+    resume = _load_resume_profile()
     prefs = _load_json(PREFERENCES_PATH)
     base_prompt = f"""
 You are evaluating job fit for a candidate. Be strict and practical.
@@ -732,9 +758,10 @@ Return ONLY a JSON array that matches the schema, in the same order as the jobs 
 
 
 def _load_templates() -> Dict[str, Any]:
-    if not TEMPLATES_PATH.exists():
+    read_path = _templates_read_path()
+    if not read_path:
         return {"templates": []}
-    data = json.loads(TEMPLATES_PATH.read_text(encoding="utf-8"))
+    data = json.loads(read_path.read_text(encoding="utf-8"))
     if isinstance(data, list):
         return {"templates": data}
     if isinstance(data, dict) and "templates" in data:
@@ -743,7 +770,8 @@ def _load_templates() -> Dict[str, Any]:
 
 
 def _save_templates(data: Dict[str, Any]) -> None:
-    TEMPLATES_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    out_path = _templates_write_path()
+    out_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _find_template(templates: Dict[str, Any], template_id: str) -> Optional[Dict[str, Any]]:
@@ -860,7 +888,7 @@ def api_ai_estimate_cover_letter(payload: CoverLetterGenerateIn):
     job = get_job(payload.job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    resume = _load_json(RESUME_PATH)
+    resume = _load_resume_profile()
     model = (payload.model or COVER_LETTER_MODEL).strip() or COVER_LETTER_MODEL
     return _estimate_cover_letter(job, resume, payload, model)
 
@@ -933,7 +961,7 @@ def api_cover_letter_generate(payload: CoverLetterGenerateIn):
     job = get_job(payload.job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    resume = _load_json(RESUME_PATH)
+    resume = _load_resume_profile()
     model = (payload.model or COVER_LETTER_MODEL).strip() or COVER_LETTER_MODEL
     template_text = ""
     if payload.template_id:

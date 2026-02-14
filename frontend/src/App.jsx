@@ -189,29 +189,34 @@ function parseProgressLine(line) {
 }
 
 function displayRegex(lines) {
+  const normalizeBoundaryEscapes = (s) => (s || "").replace(/\\+b/g, "\\b");
   return (lines || [])
     .map((l) => {
-      const unescaped = l.replace(/\\\\b/g, "\\b");
-      const m = unescaped.match(/^\\b(.+)\\b$/);
-      return m ? m[1] : unescaped;
+      const normalized = normalizeBoundaryEscapes(l);
+      if (normalized.startsWith("\\b") && normalized.endsWith("\\b") && normalized.length > 4) {
+        return normalized.slice(2, -2);
+      }
+      return normalized;
     })
     .join("\n");
 }
 
 function parseRegexLines(text) {
+  const normalizeBoundaryEscapes = (s) => (s || "").replace(/\\+b/g, "\\b");
   const hasRegexMeta = (s) => /[\\\[\]\(\)\?\+\*\.\|\^\$]/.test(s);
   return text
     .split("\n")
     .map((t) => t.trim())
     .filter(Boolean)
     .map((l) => {
-      if (l.includes("\\b")) {
-        return l.replace(/\\b/g, "\\\\b");
+      const normalized = normalizeBoundaryEscapes(l);
+      if (normalized.includes("\\b")) {
+        return normalized;
       }
-      if (hasRegexMeta(l)) {
-        return l;
+      if (hasRegexMeta(normalized)) {
+        return normalized;
       }
-      return `\\\\b${l}\\\\b`;
+      return `\\b${normalized}\\b`;
     });
 }
 

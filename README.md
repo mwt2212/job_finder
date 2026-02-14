@@ -92,6 +92,14 @@ cd frontend
 copy .env.example .env
 ```
 
+Profile/template file precedence:
+- Resume profile: `resume_profile.local.json` -> `resume_profile.json` -> `resume_profile.example.json`
+- Cover-letter templates: `cover_letter_templates.local.json` -> `cover_letter_templates.json` -> `cover_letter_templates.example.json`
+
+Personalize safely:
+- Keep your real data in `*.local.json` files (ignored by git)
+- Commit only sanitized `*.json` and `*.example.json` variants
+
 ## Pipeline Sizing
 
 Size presets are `max_results / shortlist_k / final_top`:
@@ -162,6 +170,6 @@ python run-backend.py
 
 ## Privacy
 
-- Treat `resume_profile.json`, `cover_letter_templates.json`, and browser profile data as private
+- Treat `resume_profile.local.json`, `cover_letter_templates.local.json`, and browser profile data as private
 - Keep runtime artifacts out of commits
 - Sanitize local personal content before publishing the repository
