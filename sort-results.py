@@ -5,6 +5,8 @@ from pathlib import Path
 BASE_DIR = Path(__file__).parent
 ARTIFACTS_DIR = BASE_DIR / "artifacts"
 PREFS = BASE_DIR / "preferences.json"
+PREFS_LOCAL = BASE_DIR / "preferences.local.json"
+PREFS_EXAMPLE = BASE_DIR / "preferences.example.json"
 
 OUT_APPLY_JSON  = ARTIFACTS_DIR / "apply.json"
 OUT_REVIEW_JSON = ARTIFACTS_DIR / "review.json"
@@ -20,9 +22,17 @@ def artifact_input(name: str) -> Path:
     legacy = BASE_DIR / name
     return artifact if artifact.exists() else legacy
 
+
+def resolve_prefs_path() -> Path:
+    for path in (PREFS_LOCAL, PREFS, PREFS_EXAMPLE):
+        if path.exists():
+            return path
+    return PREFS
+
 def load_thresholds():
-    if PREFS.exists():
-        prefs = json.loads(PREFS.read_text(encoding="utf-8"))
+    prefs_path = resolve_prefs_path()
+    if prefs_path.exists():
+        prefs = json.loads(prefs_path.read_text(encoding="utf-8"))
         tuning = prefs.get("tuning", {}) or {}
         thresholds = tuning.get("sort_thresholds", {}) or {}
         apply_min = int(thresholds.get("apply_min_score", 75))

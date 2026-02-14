@@ -98,7 +98,9 @@ def test_low_pay_reason_increases_salary_floor_not_match_threshold(monkeypatch, 
     rules_path.write_text(json.dumps(original_rules), encoding="utf-8")
 
     monkeypatch.setattr(app, "PREFERENCES_PATH", prefs_path)
+    monkeypatch.setattr(app, "PREFERENCES_LOCAL_PATH", tmp_path / "preferences.local.json")
     monkeypatch.setattr(app, "RULES_PATH", rules_path)
+    monkeypatch.setattr(app, "RULES_LOCAL_PATH", tmp_path / "shortlist_rules.local.json")
     monkeypatch.setattr(
         app,
         "get_job",

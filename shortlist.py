@@ -8,7 +8,11 @@ ARTIFACTS_DIR = BASE_DIR / "artifacts"
 OUTFILE = ARTIFACTS_DIR / "tier2_shortlist.json"
 OUTCSV = ARTIFACTS_DIR / "tier2_shortlist.csv"
 RULES_FILE = BASE_DIR / "shortlist_rules.json"
+RULES_LOCAL_FILE = BASE_DIR / "shortlist_rules.local.json"
+RULES_EXAMPLE_FILE = BASE_DIR / "shortlist_rules.example.json"
 PREFS_FILE = BASE_DIR / "preferences.json"
+PREFS_LOCAL_FILE = BASE_DIR / "preferences.local.json"
+PREFS_EXAMPLE_FILE = BASE_DIR / "preferences.example.json"
 RESUME_LOCAL_FILE = BASE_DIR / "resume_profile.local.json"
 RESUME_FILE = BASE_DIR / "resume_profile.json"
 RESUME_EXAMPLE_FILE = BASE_DIR / "resume_profile.example.json"
@@ -35,6 +39,20 @@ def resolve_resume_path() -> Path:
     if RESUME_FILE.exists():
         return RESUME_FILE
     return RESUME_EXAMPLE_FILE
+
+
+def resolve_prefs_path() -> Path:
+    for path in (PREFS_LOCAL_FILE, PREFS_FILE, PREFS_EXAMPLE_FILE):
+        if path.exists():
+            return path
+    return PREFS_FILE
+
+
+def resolve_rules_path() -> Path:
+    for path in (RULES_LOCAL_FILE, RULES_FILE, RULES_EXAMPLE_FILE):
+        if path.exists():
+            return path
+    return RULES_FILE
 
 
 def norm(s: str) -> str:
@@ -166,8 +184,8 @@ def main():
     parser.add_argument("--target-n", type=int, default=0, help="Override shortlist size")
     args = parser.parse_args()
 
-    rules = load_json(RULES_FILE, {})
-    prefs = load_json(PREFS_FILE, {})
+    rules = load_json(resolve_rules_path(), {})
+    prefs = load_json(resolve_prefs_path(), {})
     resume = load_json(resolve_resume_path(), {})
 
     infile = artifact_input("tier2_metadata.json")

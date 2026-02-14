@@ -1,0 +1,8 @@
+{
+  "Example City": {
+    "url": "https://www.linkedin.com/jobs/search/?keywords=operations+analyst&location=Example+City%2C+ST&sortBy=DD",
+    "location_label": "Example City, ST",
+    "keywords": "operations analyst",
+    "schema_version": "1.0"
+  }
+}

@@ -25,6 +25,8 @@ RESUME_LOCAL = BASE_DIR / "resume_profile.local.json"
 RESUME = BASE_DIR / "resume_profile.json"
 RESUME_EXAMPLE = BASE_DIR / "resume_profile.example.json"
 PREFS = BASE_DIR / "preferences.json"
+PREFS_LOCAL = BASE_DIR / "preferences.local.json"
+PREFS_EXAMPLE = BASE_DIR / "preferences.example.json"
 OUTFILE = ARTIFACTS_DIR / "tier2_scored.json"
 
 client = OpenAI() if OpenAI else None
@@ -179,6 +181,13 @@ def resolve_resume_path() -> Path:
     return RESUME_EXAMPLE
 
 
+def resolve_prefs_path() -> Path:
+    for path in (PREFS_LOCAL, PREFS, PREFS_EXAMPLE):
+        if path.exists():
+            return path
+    return PREFS
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser()
@@ -199,7 +208,8 @@ def main():
     if args.limit and args.limit > 0:
         jobs = jobs[: args.limit]
     resume = json.loads(resume_path.read_text(encoding="utf-8"))
-    prefs = json.loads(PREFS.read_text(encoding="utf-8")) if PREFS.exists() else {}
+    prefs_path = resolve_prefs_path()
+    prefs = json.loads(prefs_path.read_text(encoding="utf-8")) if prefs_path.exists() else {}
 
     pricing = load_pricing()
     results = [None for _ in jobs]

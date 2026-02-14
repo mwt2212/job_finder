@@ -1,16 +1,18 @@
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import threading
 import re
 import traceback
 import uuid
+import io
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from typing import Iterator
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from ai_usage import (
     estimate_cost,
@@ -22,7 +24,7 @@ from ai_usage import (
 )
 from text_cleaning import clean_job_description
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -57,6 +59,7 @@ from backend.onboarding_validate import (
     validate_searches,
     validate_shortlist_rules,
 )
+from backend.onboarding_migrate import migrate_config_file
 
 try:
     from openai import OpenAI  # type: ignore
@@ -70,10 +73,13 @@ def _get_base_dir() -> Path:
 BASE_DIR = _get_base_dir()
 ARTIFACTS_DIR = BASE_DIR / "artifacts"
 PREFERENCES_PATH = BASE_DIR / "preferences.json"
+PREFERENCES_LOCAL_PATH = BASE_DIR / "preferences.local.json"
 PREFERENCES_EXAMPLE_PATH = BASE_DIR / "preferences.example.json"
 RULES_PATH = BASE_DIR / "shortlist_rules.json"
+RULES_LOCAL_PATH = BASE_DIR / "shortlist_rules.local.json"
 RULES_EXAMPLE_PATH = BASE_DIR / "shortlist_rules.example.json"
 SEARCHES_PATH = BASE_DIR / "searches.json"
+SEARCHES_LOCAL_PATH = BASE_DIR / "searches.local.json"
 SEARCHES_EXAMPLE_PATH = BASE_DIR / "searches.example.json"
 TEMPLATES_LOCAL_PATH = BASE_DIR / "cover_letter_templates.local.json"
 TEMPLATES_PATH = BASE_DIR / "cover_letter_templates.json"
@@ -128,12 +134,68 @@ def _templates_write_path() -> Path:
     return TEMPLATES_LOCAL_PATH
 
 
+def _preferences_read_path() -> Optional[Path]:
+    return _first_existing_path(PREFERENCES_LOCAL_PATH, PREFERENCES_PATH, PREFERENCES_EXAMPLE_PATH)
+
+
+def _preferences_write_path() -> Path:
+    return PREFERENCES_LOCAL_PATH if PREFERENCES_LOCAL_PATH.exists() else PREFERENCES_PATH
+
+
+def _rules_read_path() -> Optional[Path]:
+    return _first_existing_path(RULES_LOCAL_PATH, RULES_PATH, RULES_EXAMPLE_PATH)
+
+
+def _rules_write_path() -> Path:
+    return RULES_LOCAL_PATH if RULES_LOCAL_PATH.exists() else RULES_PATH
+
+
+def _searches_read_path() -> Optional[Path]:
+    return _first_existing_path(SEARCHES_LOCAL_PATH, SEARCHES_PATH, SEARCHES_EXAMPLE_PATH)
+
+
+def _searches_write_path() -> Path:
+    return SEARCHES_LOCAL_PATH if SEARCHES_LOCAL_PATH.exists() else SEARCHES_PATH
+
+
+def _load_preferences() -> Dict[str, Any]:
+    path = _preferences_read_path()
+    return _load_json(path) if path else {}
+
+
+def _load_rules() -> Dict[str, Any]:
+    path = _rules_read_path()
+    return _load_json(path) if path else {}
+
+
+def _load_searches_raw() -> Dict[str, Any]:
+    path = _searches_read_path()
+    return _load_json(path) if path else {}
+
+
+def _resume_user_path() -> Optional[Path]:
+    return _first_existing_path(RESUME_LOCAL_PATH, RESUME_PATH)
+
+
+def _preferences_user_path() -> Optional[Path]:
+    return _first_existing_path(PREFERENCES_LOCAL_PATH, PREFERENCES_PATH)
+
+
+def _rules_user_path() -> Optional[Path]:
+    return _first_existing_path(RULES_LOCAL_PATH, RULES_PATH)
+
+
+def _searches_user_path() -> Optional[Path]:
+    return _first_existing_path(SEARCHES_LOCAL_PATH, SEARCHES_PATH)
+
+
 def _script_path(step: str) -> Path:
     return _get_base_dir() / SCRIPT_NAMES[step]
 
 
 def _default_preferences() -> Dict[str, Any]:
     return {
+        "schema_version": "1.0",
         "search_filters": {"location_city": "", "radius_miles": 10, "posted_within_hours": 24},
         "hard_constraints": {"min_base_salary_usd": None},
         "qualification": {"min_match_score": 0.55},
@@ -142,6 +204,7 @@ def _default_preferences() -> Dict[str, Any]:
 
 def _default_shortlist_rules() -> Dict[str, Any]:
     return {
+        "schema_version": "1.0",
         "workplace_score": {"remote": 10, "hybrid": 12, "onsite": 6, "unknown": 2},
         "sales_adjacent_penalty": -10,
         "healthcare_penalty": -10,
@@ -155,6 +218,7 @@ def _default_searches() -> Dict[str, Any]:
         "Chicago": {
             "url": linkedin_url_for_search("Chicago", location),
             "location_label": location,
+            "schema_version": "1.0",
         }
     }
 
@@ -245,30 +309,94 @@ def _is_linkedin_login_required(page: Any) -> bool:
     return False
 
 
+def _format_exc(exc: Exception) -> str:
+    msg = str(exc).strip()
+    if msg:
+        return f"{exc.__class__.__name__}: {msg}"
+    return repr(exc)
+
+
 def _check_playwright_runtime() -> Dict[str, Any]:
     try:
         from playwright.sync_api import sync_playwright  # type: ignore
     except Exception as exc:
         return {
             "ok": False,
-            "message": f"Playwright import failed: {exc}",
+            "message": f"Playwright import failed: {_format_exc(exc)}",
             "fix_hint": "Install backend dependencies and run `python -m playwright install chromium`.",
         }
 
+    # Validate in a subprocess to avoid backend event-loop limitations on Windows
+    # (NotImplementedError from asyncio subprocess transport in the current loop).
+    probe_code = (
+        "from playwright.sync_api import sync_playwright\n"
+        "with sync_playwright() as p:\n"
+        "    from pathlib import Path\n"
+        "    exe = Path(p.chromium.executable_path)\n"
+        "    print(str(exe) if exe.exists() else '')\n"
+    )
     try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            page = browser.new_page()
-            page.goto("about:blank", wait_until="load", timeout=10000)
-            browser.close()
+        proc = subprocess.run(
+            [sys.executable, "-c", probe_code],
+            capture_output=True,
+            text=True,
+            timeout=25,
+        )
+        if proc.returncode != 0:
+            err = (proc.stderr or proc.stdout or "").strip()
+            return {
+                "ok": False,
+                "message": f"Playwright runtime check failed in subprocess: {err or f'exit={proc.returncode}'}",
+                "fix_hint": "Run `python -m playwright install chromium` and ensure Playwright can run from this Python environment.",
+            }
+        exe_out = (proc.stdout or "").strip()
+        if not exe_out:
+            return {
+                "ok": False,
+                "message": "Playwright runtime check failed: Chromium executable path was empty.",
+                "fix_hint": "Run `python -m playwright install chromium`.",
+            }
     except Exception as exc:
         return {
             "ok": False,
-            "message": f"Playwright browser launch failed: {exc}",
+            "message": f"Playwright runtime check failed: {_format_exc(exc)}",
             "fix_hint": "Run `python -m playwright install chromium` and ensure browser binaries are accessible.",
         }
 
     return {"ok": True, "message": "Playwright/browser dependency is available.", "fix_hint": ""}
+
+
+def _find_cookie_db(profile: Path) -> Optional[Path]:
+    candidates = [
+        profile / "Default" / "Network" / "Cookies",
+        profile / "Default" / "Cookies",
+        profile / "Network" / "Cookies",
+        profile / "Cookies",
+    ]
+    for path in candidates:
+        if path.exists():
+            return path
+    return None
+
+
+def _has_linkedin_session_cookie(cookie_db: Path) -> Tuple[bool, str]:
+    try:
+        conn = sqlite3.connect(f"file:{cookie_db}?mode=ro", uri=True)
+        try:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM cookies
+                WHERE name = 'li_at'
+                  AND host_key LIKE '%linkedin.com'
+                LIMIT 1
+                """
+            ).fetchone()
+        finally:
+            conn.close()
+        return bool(row), ""
+    except Exception as exc:
+        return False, _format_exc(exc)
 
 
 def _check_linkedin_session() -> Dict[str, Any]:
@@ -280,37 +408,26 @@ def _check_linkedin_session() -> Dict[str, Any]:
             "fix_hint": "Run `python setup-linkedin-profile.py` and sign in to LinkedIn once.",
         }
 
-    try:
-        from playwright.sync_api import sync_playwright  # type: ignore
-    except Exception as exc:
+    cookie_db = _find_cookie_db(profile)
+    if not cookie_db:
         return {
             "ok": False,
-            "message": f"Playwright import failed: {exc}",
-            "fix_hint": "Install backend dependencies and run `python -m playwright install chromium`.",
+            "message": f"Unable to verify LinkedIn session: no Chrome cookie DB found in {profile}",
+            "fix_hint": "Run `python setup-linkedin-profile.py` once and ensure Chrome profile data is created.",
         }
 
-    try:
-        with sync_playwright() as p:
-            context = p.chromium.launch_persistent_context(
-                user_data_dir=str(profile),
-                headless=True,
-                args=["--no-sandbox"],
-            )
-            page = context.new_page()
-            page.goto("https://www.linkedin.com/jobs/search/", wait_until="domcontentloaded", timeout=30000)
-            login_required = _is_linkedin_login_required(page)
-            context.close()
-            if login_required:
-                return {
-                    "ok": False,
-                    "message": "LinkedIn login required for the configured profile.",
-                    "fix_hint": "Run `python setup-linkedin-profile.py`, sign in, then retry preflight.",
-                }
-    except Exception as exc:
+    has_cookie, err = _has_linkedin_session_cookie(cookie_db)
+    if err:
         return {
             "ok": False,
-            "message": f"Unable to verify LinkedIn session: {exc}",
+            "message": f"Unable to verify LinkedIn session from cookie DB: {err}",
             "fix_hint": "Close Chrome windows using this profile and rerun `python setup-linkedin-profile.py`.",
+        }
+    if not has_cookie:
+        return {
+            "ok": False,
+            "message": "LinkedIn session cookie (li_at) was not found in the configured profile.",
+            "fix_hint": "Run `python setup-linkedin-profile.py`, sign in on LinkedIn, then retry preflight.",
         }
 
     return {"ok": True, "message": "LinkedIn session check passed.", "fix_hint": ""}
@@ -323,9 +440,9 @@ def _build_check(check_id: str, ok: bool, message: str, fix_hint: str = "", warn
 
 def _onboarding_validation_snapshot() -> Dict[str, Any]:
     resume_data = _load_resume_profile()
-    preferences_data = _load_json(PREFERENCES_PATH)
-    rules_data = _load_json(RULES_PATH)
-    searches_data = _load_json(SEARCHES_PATH)
+    preferences_data = _load_preferences()
+    rules_data = _load_rules()
+    searches_data = _load_searches_raw()
     return validate_all(resume_data, preferences_data, rules_data, searches_data)
 
 
@@ -388,6 +505,221 @@ def _onboarding_status_payload() -> Dict[str, Any]:
         "checks": checks,
         "validation": validation,
     }
+
+
+def _normalize_searches_payload(payload: Any) -> Dict[str, Dict[str, Any]]:
+    if isinstance(payload, dict):
+        out: Dict[str, Dict[str, Any]] = {}
+        for label, cfg in payload.items():
+            if isinstance(cfg, dict):
+                out[str(label)] = cfg
+        return out
+    if isinstance(payload, list):
+        out = {}
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            label = str(item.get("label") or "").strip()
+            if not label:
+                continue
+            cfg = {k: v for k, v in item.items() if k != "label"}
+            out[label] = cfg
+        return out
+    return {}
+
+
+def _load_searches_map() -> Dict[str, Dict[str, Any]]:
+    return _normalize_searches_payload(_load_searches_raw())
+
+
+def _save_searches_map(searches: Dict[str, Dict[str, Any]]) -> None:
+    _save_json(_searches_write_path(), searches)
+
+
+def _search_to_item(label: str, cfg: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "label": label,
+        "url": str(cfg.get("url") or ""),
+        "location_label": str(cfg.get("location_label") or ""),
+        "keywords": str(cfg.get("keywords") or ""),
+    }
+
+
+def _validate_or_400(result: tuple[bool, List[str], List[str]]) -> Dict[str, Any]:
+    ok, errors, warnings = result
+    if not ok:
+        raise HTTPException(status_code=400, detail={"errors": errors, "warnings": warnings})
+    return {"ok": ok, "errors": errors, "warnings": warnings}
+
+
+def _build_search_record(label: str, payload: Dict[str, Any], existing: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    previous = existing or {}
+    location_label = str(payload.get("location_label") or previous.get("location_label") or "").strip()
+    keywords = str(payload.get("keywords") or previous.get("keywords") or "").strip()
+    url = str(payload.get("url") or "").strip()
+    if not url:
+        url = linkedin_url_for_search(label=label, location_label=location_label, keywords=keywords)
+    record = {"url": url, "location_label": location_label}
+    if keywords:
+        record["keywords"] = keywords
+    return record
+
+
+def _model_to_dict(model: Any, *, exclude_unset: bool = False) -> Dict[str, Any]:
+    if hasattr(model, "model_dump"):
+        return model.model_dump(exclude_unset=exclude_unset)  # type: ignore[call-arg]
+    if hasattr(model, "dict"):
+        return model.dict(exclude_unset=exclude_unset)  # type: ignore[call-arg]
+    return {}
+
+
+def _build_profile_draft_from_text(text: str) -> Dict[str, Any]:
+    raw = (text or "").strip()
+    lowered = raw.lower()
+
+    known_roles = [
+        "business analyst",
+        "operations analyst",
+        "data analyst",
+        "project coordinator",
+        "compliance analyst",
+        "risk analyst",
+    ]
+    known_skills = ["python", "sql", "excel", "tableau", "power bi", "salesforce", "fastapi", "javascript"]
+
+    target_roles = [role.title() for role in known_roles if role in lowered]
+    skills = [skill.upper() if skill == "sql" else skill.title() for skill in known_skills if skill in lowered]
+
+    location_match = re.search(r"\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*,\s*[A-Z]{2})\b", raw)
+    location_label = location_match.group(1) if location_match else "Example City, ST"
+
+    missing_prompts: List[str] = []
+    if not target_roles:
+        missing_prompts.append("What are your top 2-3 preferred roles?")
+    if not skills:
+        missing_prompts.append("List 5-10 skills/tools you are strongest in.")
+    if "salary" not in lowered and "$" not in raw:
+        missing_prompts.append("What is your minimum acceptable base salary?")
+    if "remote" not in lowered and "hybrid" not in lowered and "onsite" not in lowered:
+        missing_prompts.append("Do you prefer remote, hybrid, or onsite?")
+    if not location_match:
+        missing_prompts.append("Which city/state should searches prioritize?")
+
+    confidence = 0.45
+    if target_roles:
+        confidence += 0.2
+    if skills:
+        confidence += 0.2
+    if location_match:
+        confidence += 0.1
+    confidence = round(min(0.95, confidence), 2)
+
+    resume_profile = {
+        "schema_version": "1.0",
+        "skills": skills or ["Python", "SQL", "Excel"],
+        "target_roles": target_roles or ["Business Analyst"],
+        "career_goal": raw[:220] if raw else "Transition into a role with strong analytical and growth opportunities.",
+    }
+    preferences = {
+        "schema_version": "1.0",
+        "qualification": {"min_match_score": 0.55},
+        "hard_constraints": {"min_base_salary_usd": None, "no_cold_calling": True},
+        "search_filters": {"location_city": location_label, "posted_within_hours": 24, "radius_miles": 10},
+    }
+    shortlist_rules = {
+        "schema_version": "1.0",
+        "workplace_score": {"remote": 10, "hybrid": 12, "onsite": 6, "unknown": 2},
+        "sales_adjacent_penalty": -10,
+        "healthcare_penalty": -10,
+        "wrong_field_penalty": -8,
+    }
+    searches = {
+        location_label.split(",")[0]: {
+            "url": linkedin_url_for_search(label=location_label.split(",")[0], location_label=location_label, keywords=" ".join(target_roles[:1]).strip()),
+            "location_label": location_label,
+            "keywords": " ".join(target_roles[:1]).strip(),
+            "schema_version": "1.0",
+        }
+    }
+
+    return {
+        "resume_profile": resume_profile,
+        "preferences": preferences,
+        "shortlist_rules": shortlist_rules,
+        "searches": searches,
+        "confidence": confidence,
+        "missing_fields_prompts": missing_prompts,
+    }
+
+
+def _extract_text_from_upload(filename: str, content: bytes) -> str:
+    name = (filename or "").lower()
+    if name.endswith(".txt") or name.endswith(".md"):
+        return content.decode("utf-8", errors="ignore")
+
+    if name.endswith(".docx"):
+        try:
+            from docx import Document  # type: ignore
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"DOCX parser unavailable: {_format_exc(exc)}")
+        try:
+            doc = Document(io.BytesIO(content))
+            lines = [p.text.strip() for p in doc.paragraphs if p.text and p.text.strip()]
+            return "\n".join(lines)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Failed to parse DOCX: {_format_exc(exc)}")
+
+    if name.endswith(".pdf"):
+        try:
+            from pypdf import PdfReader  # type: ignore
+        except Exception:
+            raise HTTPException(status_code=500, detail="PDF parser dependency is missing. Reinstall backend requirements.")
+        try:
+            reader = PdfReader(io.BytesIO(content))
+            parts = []
+            for page in reader.pages:
+                parts.append(page.extract_text() or "")
+            return "\n".join(parts).strip()
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Failed to parse PDF: {_format_exc(exc)}")
+
+    raise HTTPException(status_code=400, detail="Unsupported resume file type. Use .txt, .docx, or .pdf")
+
+
+def _ai_parse_resume_text(text: str) -> Optional[Dict[str, Any]]:
+    if not (OpenAI and (os.getenv("OPENAI_API_KEY") or "").strip()):
+        return None
+    try:
+        client = OpenAI()
+    except Exception:
+        return None
+
+    prompt = (
+        "Extract structured candidate profile JSON from this resume text.\n"
+        "Return strict JSON only with keys: resume_profile, confidence, missing_fields_prompts.\n"
+        "resume_profile should include: skills (array), target_roles (array), education (object), experience (array), career_goal (string).\n"
+        "If uncertain, keep values conservative and add targeted follow-up prompts.\n\n"
+        f"Resume text:\n{text[:12000]}"
+    )
+    try:
+        if hasattr(client, "responses"):
+            resp = client.responses.create(model="gpt-4.1-mini", input=prompt)
+            out_text = getattr(resp, "output_text", "") or ""
+        else:
+            resp = client.chat.completions.create(
+                model="gpt-4.1-mini",
+                messages=[
+                    {"role": "system", "content": "Return valid JSON only."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0,
+            )
+            out_text = resp.choices[0].message.content or ""
+        if not out_text:
+            return None
+        return json.loads(out_text)
+    except Exception:
+        return None
 
 app = FastAPI(title="Job Finder Dashboard")
 
@@ -483,6 +815,24 @@ class CoverLetterTemplateIn(BaseModel):
 class AiEstimatePipelineIn(BaseModel):
     size: str
     model: Optional[str] = None
+
+
+class OnboardingSearchIn(BaseModel):
+    label: str
+    location_label: str
+    keywords: Optional[str] = ""
+    url: Optional[str] = ""
+
+
+class OnboardingSearchUpdateIn(BaseModel):
+    location_label: Optional[str] = None
+    keywords: Optional[str] = None
+    url: Optional[str] = None
+    label: Optional[str] = None
+
+
+class OnboardingProfileDraftIn(BaseModel):
+    text: str
 
 
 @app.on_event("startup")
@@ -898,7 +1248,7 @@ def _estimate_ai_eval(size: str, model_override: Optional[str] = None) -> Dict[s
     avg_desc_chars = 4800
 
     resume = _load_resume_profile()
-    prefs = _load_json(PREFERENCES_PATH)
+    prefs = _load_preferences()
     base_prompt = f"""
 You are evaluating job fit for a candidate. Be strict and practical.
 
@@ -971,7 +1321,7 @@ def _estimate_ai_eval_from_file(model_override: Optional[str] = None) -> Dict[st
         avg_desc_chars = int(sum(desc_lengths) / len(desc_lengths))
 
     resume = _load_resume_profile()
-    prefs = _load_json(PREFERENCES_PATH)
+    prefs = _load_preferences()
     base_prompt = f"""
 You are evaluating job fit for a candidate. Be strict and practical.
 
@@ -1144,9 +1494,172 @@ def api_ai_feedback(payload: AiEvalFeedbackIn):
 
 @app.get("/settings")
 def api_get_settings():
-    prefs = _load_json(PREFERENCES_PATH)
-    rules = _load_json(RULES_PATH)
+    prefs = _load_preferences()
+    rules = _load_rules()
     return {"preferences": prefs, "rules": rules}
+
+
+@app.get("/onboarding/config")
+def api_onboarding_get_config():
+    return {
+        "resume_profile": _load_resume_profile(),
+        "preferences": _load_preferences(),
+        "shortlist_rules": _load_rules(),
+        "searches": _load_searches_map(),
+    }
+
+
+@app.put("/onboarding/config/resume-profile")
+def api_onboarding_put_resume_profile(payload: Dict[str, Any]):
+    validation = _validate_or_400(validate_resume_profile(payload or {}))
+    _save_json(RESUME_LOCAL_PATH, payload or {})
+    return {"ok": True, "path": str(RESUME_LOCAL_PATH), "validation": validation}
+
+
+@app.put("/onboarding/config/preferences")
+def api_onboarding_put_preferences(payload: Dict[str, Any]):
+    validation = _validate_or_400(validate_preferences(payload or {}))
+    write_path = _preferences_write_path()
+    _save_json(write_path, payload or {})
+    return {"ok": True, "path": str(write_path), "validation": validation}
+
+
+@app.put("/onboarding/config/shortlist-rules")
+def api_onboarding_put_shortlist_rules(payload: Dict[str, Any]):
+    validation = _validate_or_400(validate_shortlist_rules(payload or {}))
+    write_path = _rules_write_path()
+    _save_json(write_path, payload or {})
+    return {"ok": True, "path": str(write_path), "validation": validation}
+
+
+@app.put("/onboarding/config/searches")
+def api_onboarding_put_searches(payload: Any):
+    searches = _normalize_searches_payload(payload)
+    validation = _validate_or_400(validate_searches(searches))
+    _save_searches_map(searches)
+    return {"ok": True, "path": str(_searches_write_path()), "validation": validation}
+
+
+@app.post("/onboarding/profile-draft")
+def api_onboarding_profile_draft(payload: OnboardingProfileDraftIn):
+    text = (payload.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+    return _build_profile_draft_from_text(text)
+
+
+@app.post("/onboarding/resume-parse")
+async def api_onboarding_resume_parse(file: UploadFile = File(...)):
+    filename = file.filename or "resume"
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+    text = _extract_text_from_upload(filename, raw)
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="No readable text extracted from resume file")
+
+    draft = _build_profile_draft_from_text(text)
+    ai_draft = _ai_parse_resume_text(text)
+    if ai_draft and isinstance(ai_draft, dict):
+        resume_profile = ai_draft.get("resume_profile")
+        if isinstance(resume_profile, dict):
+            draft["resume_profile"] = {**draft.get("resume_profile", {}), **resume_profile}
+        if isinstance(ai_draft.get("confidence"), (int, float)):
+            draft["confidence"] = float(ai_draft["confidence"])
+        prompts = ai_draft.get("missing_fields_prompts")
+        if isinstance(prompts, list):
+            draft["missing_fields_prompts"] = [str(p) for p in prompts if str(p).strip()]
+        draft["ai_used"] = True
+    else:
+        draft["ai_used"] = False
+
+    return {"filename": filename, "extracted_chars": len(text), "draft": draft}
+
+
+@app.get("/onboarding/searches")
+def api_onboarding_get_searches():
+    searches = _load_searches_map()
+    items = [_search_to_item(label, cfg) for label, cfg in searches.items()]
+    return {"items": items}
+
+
+@app.post("/onboarding/searches")
+def api_onboarding_create_search(payload: OnboardingSearchIn):
+    label = payload.label.strip()
+    if not label:
+        raise HTTPException(status_code=400, detail="Search label is required")
+    searches = _load_searches_map()
+    if label in searches:
+        raise HTTPException(status_code=409, detail=f"Search label already exists: {label}")
+    searches[label] = _build_search_record(label, _model_to_dict(payload))
+    validation = _validate_or_400(validate_searches(searches))
+    _save_searches_map(searches)
+    return {"ok": True, "item": _search_to_item(label, searches[label]), "validation": validation}
+
+
+@app.put("/onboarding/searches/{label}")
+def api_onboarding_update_search(label: str, payload: OnboardingSearchUpdateIn):
+    name = label.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Search label is required")
+    searches = _load_searches_map()
+    current = searches.get(name)
+    if not isinstance(current, dict):
+        raise HTTPException(status_code=404, detail=f"Search not found: {name}")
+    patch = _model_to_dict(payload, exclude_unset=True)
+    rename_to = str(patch.pop("label", "") or "").strip()
+    target_label = rename_to or name
+    if target_label != name and target_label in searches:
+        raise HTTPException(status_code=409, detail=f"Search label already exists: {target_label}")
+    updated = _build_search_record(target_label, patch, existing=current)
+    if target_label != name:
+        del searches[name]
+    searches[target_label] = updated
+    validation = _validate_or_400(validate_searches(searches))
+    _save_searches_map(searches)
+    return {"ok": True, "item": _search_to_item(target_label, updated), "validation": validation}
+
+
+@app.delete("/onboarding/searches/{label}")
+def api_onboarding_delete_search(label: str):
+    name = label.strip()
+    searches = _load_searches_map()
+    if name not in searches:
+        raise HTTPException(status_code=404, detail=f"Search not found: {name}")
+    del searches[name]
+    validation = _validate_or_400(validate_searches(searches))
+    _save_searches_map(searches)
+    return {"ok": True, "validation": validation}
+
+
+@app.get("/onboarding/linkedin/status")
+def api_onboarding_linkedin_status():
+    profile = _resolve_chrome_profile()
+    check = _check_linkedin_session()
+    return {
+        "ok": bool(check.get("ok")),
+        "profile_path": str(profile),
+        "profile_exists": profile.exists(),
+        "message": check.get("message", ""),
+        "fix_hint": check.get("fix_hint", ""),
+    }
+
+
+@app.post("/onboarding/linkedin/init")
+def api_onboarding_linkedin_init():
+    profile = _resolve_chrome_profile()
+    script_path = BASE_DIR / "setup-linkedin-profile.py"
+    return {
+        "ok": True,
+        "script_path": str(script_path),
+        "profile_path": str(profile),
+        "instructions": [
+            "Run `python setup-linkedin-profile.py` from the repo root.",
+            "Sign in to LinkedIn in the opened browser window.",
+            "Press Enter in terminal to let the script verify session.",
+            "Then run `/onboarding/linkedin/status` or `/onboarding/preflight` again.",
+        ],
+    }
 
 
 @app.post("/onboarding/bootstrap")
@@ -1247,6 +1760,37 @@ def api_onboarding_preflight():
     )
 
     return {"ready": all(c["status"] == "pass" for c in checks), "checks": checks, "validation": validation}
+
+
+@app.post("/onboarding/migrate")
+def api_onboarding_migrate():
+    targets = [
+        ("resume_profile", _resume_user_path()),
+        ("preferences", _preferences_user_path()),
+        ("shortlist_rules", _rules_user_path()),
+        ("searches", _searches_user_path()),
+    ]
+    reports: List[Dict[str, Any]] = []
+    for config_id, path in targets:
+        if not path:
+            reports.append(
+                {
+                    "id": config_id,
+                    "status": "skipped",
+                    "reason": "No user config file found (local/base).",
+                }
+            )
+            continue
+        data = _load_json(path)
+        reports.append(migrate_config_file(config_id=config_id, path=path, data=data))
+
+    return {
+        "ok": True,
+        "items": reports,
+        "migrated_count": sum(1 for item in reports if item.get("status") == "migrated"),
+        "noop_count": sum(1 for item in reports if item.get("status") == "noop"),
+        "skipped_count": sum(1 for item in reports if item.get("status") == "skipped"),
+    }
 
 
 @app.get("/ai/pricing")
@@ -1502,10 +2046,8 @@ def api_cover_letter_export(cover_id: int, format: str = "txt"):
 
 @app.get("/searches")
 def api_get_searches():
-    if not SEARCHES_PATH.exists():
-        return {"searches": []}
-    data = json.loads(SEARCHES_PATH.read_text(encoding="utf-8"))
-    items = [{"label": k, "url": v.get("url", "")} for k, v in data.items()]
+    searches = _load_searches_map()
+    items = [_search_to_item(label, cfg) for label, cfg in searches.items()]
     return {"searches": items}
 
 
@@ -1514,9 +2056,9 @@ def api_put_settings(payload: Dict[str, Any]):
     prefs = payload.get("preferences")
     rules = payload.get("rules")
     if prefs is not None:
-        _save_json(PREFERENCES_PATH, prefs)
+        _save_json(_preferences_write_path(), prefs)
     if rules is not None:
-        _save_json(RULES_PATH, rules)
+        _save_json(_rules_write_path(), rules)
     return {"ok": True}
 
 
@@ -1524,9 +2066,10 @@ def api_put_settings(payload: Dict[str, Any]):
 def api_run_start(payload: StartIn):
     if payload.size not in SIZE_PRESETS:
         raise HTTPException(status_code=400, detail="Invalid size")
-    if not SEARCHES_PATH.exists():
+    searches_path = _searches_read_path()
+    if not searches_path or not searches_path.exists():
         raise HTTPException(status_code=400, detail="Missing searches.json")
-    searches = json.loads(SEARCHES_PATH.read_text(encoding="utf-8"))
+    searches = _load_searches_map()
     if payload.search not in searches:
         raise HTTPException(status_code=400, detail="Invalid search")
     _sync_search_location_preference(payload.search, searches)
@@ -1590,9 +2133,10 @@ def api_run_step(step: str, search: Optional[str] = None, query: Optional[str] =
             )
         except Exception:
             pass
-    if step == "scout" and search and SEARCHES_PATH.exists():
+    searches_path = _searches_read_path()
+    if step == "scout" and search and searches_path and searches_path.exists():
         try:
-            searches = json.loads(SEARCHES_PATH.read_text(encoding="utf-8"))
+            searches = _load_searches_map()
             _sync_search_location_preference(search, searches)
         except Exception:
             pass
@@ -1813,24 +2357,24 @@ def api_import(payload: ImportIn):
 
 @app.post("/suggestions/generate")
 def api_generate_suggestions():
-    prefs = _load_json(PREFERENCES_PATH)
+    prefs = _load_preferences()
     suggestions = _generate_suggestions(prefs)
     return {"suggestions": suggestions}
 
 
 @app.post("/suggestions/apply")
 def api_apply_suggestions(payload: SuggestionsApplyIn):
-    prefs = _load_json(PREFERENCES_PATH)
+    prefs = _load_preferences()
     for op in payload.operations:
         _apply_op(prefs, op)
-    _save_json(PREFERENCES_PATH, prefs)
+    _save_json(_preferences_write_path(), prefs)
     return {"ok": True}
 
 
 # ------------------ Helpers ------------------
 
-def _load_json(path: Path) -> Dict[str, Any]:
-    if not path.exists():
+def _load_json(path: Optional[Path]) -> Dict[str, Any]:
+    if not path or not path.exists():
         return {}
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -2082,7 +2626,7 @@ def _sync_search_location_preference(search_label: str, searches: Dict[str, Any]
     location_label = (selected.get("location_label") or "").strip()
     if not location_label:
         return
-    prefs = _load_json(PREFERENCES_PATH)
+    prefs = _load_preferences()
     search_filters = prefs.get("search_filters")
     if not isinstance(search_filters, dict):
         search_filters = {}
@@ -2090,15 +2634,15 @@ def _sync_search_location_preference(search_label: str, searches: Dict[str, Any]
         return
     search_filters["location_city"] = location_label
     prefs["search_filters"] = search_filters
-    _save_json(PREFERENCES_PATH, prefs)
+    _save_json(_preferences_write_path(), prefs)
 
 
 def _auto_tune_from_shortlist(job_id: int, verdict: str, reason: str) -> None:
     job = get_job(job_id)
     if not job:
         return
-    prefs = _load_json(PREFERENCES_PATH)
-    rules = _load_json(RULES_PATH)
+    prefs = _load_preferences()
+    rules = _load_rules()
 
     changed = []
 
@@ -2150,8 +2694,8 @@ def _auto_tune_from_shortlist(job_id: int, verdict: str, reason: str) -> None:
         changed.append({"preferences.qualification.min_match_score": q["min_match_score"]})
 
     if changed:
-        _save_json(PREFERENCES_PATH, prefs)
-        _save_json(RULES_PATH, rules)
+        _save_json(_preferences_write_path(), prefs)
+        _save_json(_rules_write_path(), rules)
         _append_tuning_log({"source": "shortlist", "job_id": job_id, "verdict": verdict, "reason": reason, "changes": changed})
 
 
@@ -2159,7 +2703,7 @@ def _auto_tune_from_ai(job_id: int, correct_bucket: str) -> None:
     job = get_job(job_id)
     if not job:
         return
-    prefs = _load_json(PREFERENCES_PATH)
+    prefs = _load_preferences()
     tuning = prefs.get("tuning", {}) or {}
     thresholds = tuning.get("sort_thresholds", {}) or {}
 
@@ -2189,5 +2733,6 @@ def _auto_tune_from_ai(job_id: int, correct_bucket: str) -> None:
     if changed:
         tuning["sort_thresholds"] = {"apply_min_score": apply_min, "review_min_score": review_min}
         prefs["tuning"] = tuning
-        _save_json(PREFERENCES_PATH, prefs)
+        _save_json(_preferences_write_path(), prefs)
         _append_tuning_log({"source": "ai_eval", "job_id": job_id, "changes": changed})
+

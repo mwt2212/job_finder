@@ -10,6 +10,7 @@ Local-first job intelligence pipeline with a FastAPI backend, React dashboard, a
 
 - End-to-end pipeline: `scout -> shortlist -> scrape -> eval` (+ optional `sort`)
 - Unified operations UI for jobs, ratings, settings, pipeline runs, and cover letters
+- Guided onboarding wizard with setup checks, config save flow, and preflight gating
 - Local SQLite persistence with importable JSON/CSV artifacts
 - Feedback-to-tuning loop with guarded, idempotent behavior
 - Cost-aware AI eval and cover-letter generation tracking
@@ -56,6 +57,19 @@ npm run dev
 
 Open `http://localhost:5173`.
 
+## Onboarding (Recommended First Run)
+
+Use the `Onboarding` tab in the dashboard to complete setup:
+- Step 1: environment status + bootstrap skeleton files
+- Step 2: LinkedIn session setup/status
+- Step 3: resume/profile capture + plain-English draft + resume upload parsing
+- Step 4: preferences + shortlist rules
+- Step 5: searches add/remove
+- Step 6: review + save
+- Step 7: preflight verification before first run
+
+Pipeline start is preflight-gated. If hard checks fail, `Start` is blocked with actionable fix hints.
+
 ## One-Time LinkedIn Login Setup
 
 To keep scraping isolated from your personal browser, this project uses a dedicated Chrome profile.
@@ -95,6 +109,9 @@ copy .env.example .env
 Profile/template file precedence:
 - Resume profile: `resume_profile.local.json` -> `resume_profile.json` -> `resume_profile.example.json`
 - Cover-letter templates: `cover_letter_templates.local.json` -> `cover_letter_templates.json` -> `cover_letter_templates.example.json`
+- Preferences: `preferences.local.json` -> `preferences.json` -> `preferences.example.json`
+- Shortlist rules: `shortlist_rules.local.json` -> `shortlist_rules.json` -> `shortlist_rules.example.json`
+- Searches: `searches.local.json` -> `searches.json` -> `searches.example.json`
 
 Personalize safely:
 - Keep your real data in `*.local.json` files (ignored by git)
@@ -103,9 +120,28 @@ Personalize safely:
 ## Pipeline Sizing
 
 Size presets are `max_results / shortlist_k / final_top`:
+- Test: `1 / 1 / 1`
 - Large: `1000 / 120 / 50`
 - Medium: `500 / 60 / 20`
 - Small: `100 / 30 / 10`
+
+## Onboarding API Surface
+
+Key onboarding routes:
+- `POST /onboarding/bootstrap`
+- `GET /onboarding/status`
+- `POST /onboarding/preflight`
+- `POST /onboarding/migrate`
+- `GET /onboarding/config`
+- `PUT /onboarding/config/resume-profile`
+- `PUT /onboarding/config/preferences`
+- `PUT /onboarding/config/shortlist-rules`
+- `PUT /onboarding/config/searches`
+- `POST /onboarding/profile-draft`
+- `POST /onboarding/resume-parse`
+- `GET/POST/PUT/DELETE /onboarding/searches...`
+- `GET /onboarding/linkedin/status`
+- `POST /onboarding/linkedin/init`
 
 ## Data Lifecycle
 
@@ -126,6 +162,13 @@ Persistent operator config:
 - `resume_profile.json`
 - `cover_letter_templates.json`
 - `ai_pricing.json`
+
+Local/private variants (preferred for personal data):
+- `preferences.local.json`
+- `shortlist_rules.local.json`
+- `searches.local.json`
+- `resume_profile.local.json`
+- `cover_letter_templates.local.json`
 
 ## AI Cost Tracking
 
@@ -150,6 +193,15 @@ Chrome profile lock error:
 LinkedIn login required during `scout` or `scrape`:
 - Run `python setup-linkedin-profile.py` once
 - Make sure the same `JOBFINDER_CHROME_PROFILE` path is used when running the backend/pipeline
+
+Pipeline start blocked by preflight:
+- Open the `Onboarding` or `Pipeline` tab preflight panel
+- Run checks and apply listed `fix_hint` steps
+- Ensure `playwright_runtime` and `linkedin_session` are both `pass`
+
+Resume parse upload fails:
+- Supported formats: `.txt`, `.docx`, `.pdf`
+- Ensure backend dependencies are installed from `backend/requirements.txt` (includes `python-docx` and `pypdf`)
 
 README preview image not showing on GitHub:
 - Ensure file exists in repo at `docs/dashboard-preview.png`

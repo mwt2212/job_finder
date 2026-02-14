@@ -12,3 +12,6 @@ backend/__pycache__/
 backend/tests/__pycache__/
 resume_profile.local.json
 cover_letter_templates.local.json
+preferences.local.json
+shortlist_rules.local.json
+searches.local.json

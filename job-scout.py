@@ -16,6 +16,8 @@ OUTFILE = "tier2_metadata.json"
 BASE_DIR = Path(__file__).parent
 ARTIFACTS_DIR = BASE_DIR / "artifacts"
 SEARCHES_FILE = BASE_DIR / "searches.json"
+SEARCHES_LOCAL_FILE = BASE_DIR / "searches.local.json"
+SEARCHES_EXAMPLE_FILE = BASE_DIR / "searches.example.json"
 
 CHROME_PROFILE_PATH = Path(
     os.getenv("JOBFINDER_CHROME_PROFILE") or (BASE_DIR / "chrome-profile")
@@ -349,8 +351,13 @@ def extract_fields_from_card(li_locator, job_url: str, location_label: str):
 
 # ================== MAIN ==================
 def load_searches() -> dict:
-    if SEARCHES_FILE.exists():
-        return json.loads(SEARCHES_FILE.read_text(encoding="utf-8"))
+    source = None
+    for candidate in (SEARCHES_LOCAL_FILE, SEARCHES_FILE, SEARCHES_EXAMPLE_FILE):
+        if candidate.exists():
+            source = candidate
+            break
+    if source:
+        return json.loads(source.read_text(encoding="utf-8"))
     return {
         "Chicago": {
             "url": BASE_URL,

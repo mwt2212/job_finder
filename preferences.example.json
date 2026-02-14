@@ -1,7 +1,8 @@
 {
-  "profile_version": "2026-01-31",
+  "schema_version": "1.0",
+  "profile_version": "example-1",
   "search_filters": {
-    "location_city": "Colorado Springs, CO",
+    "location_city": "Example City, ST",
     "radius_miles": 10,
     "posted_within_hours": 24,
     "employment_type_required": [
@@ -70,7 +71,7 @@
       "years"
     ],
     "safe_vs_stretch_ratio": 0.7,
-    "min_match_score": 0.79
+    "min_match_score": 0.55
   },
   "employment": {
     "hard_block_non_full_time": true
@@ -80,7 +81,7 @@
   },
   "tuning": {
     "sort_thresholds": {
-      "apply_min_score": 71,
+      "apply_min_score": 75,
       "review_min_score": 55
     }
   }
