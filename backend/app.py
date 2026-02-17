@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 from typing import Iterator
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from contextlib import asynccontextmanager
 
 from ai_usage import (
     estimate_cost,
@@ -721,7 +722,14 @@ def _ai_parse_resume_text(text: str) -> Optional[Dict[str, Any]]:
     except Exception:
         return None
 
-app = FastAPI(title="Job Finder Dashboard")
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    print(f"Backend loaded from {__file__}", flush=True)
+    init_db()
+    yield
+
+
+app = FastAPI(title="Job Finder Dashboard", lifespan=_lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -833,12 +841,6 @@ class OnboardingSearchUpdateIn(BaseModel):
 
 class OnboardingProfileDraftIn(BaseModel):
     text: str
-
-
-@app.on_event("startup")
-def _startup() -> None:
-    print(f"Backend loaded from {__file__}", flush=True)
-    init_db()
 
 
 @app.get("/health")
