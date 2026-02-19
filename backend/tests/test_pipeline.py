@@ -120,3 +120,68 @@ def test_low_pay_reason_increases_salary_floor_not_match_threshold(monkeypatch, 
     assert updated_prefs["hard_constraints"]["min_base_salary_usd"] == 51000
     assert updated_prefs["qualification"]["min_match_score"] == 0.55
     assert updated_rules == original_rules
+
+
+def test_ai_eval_estimate_from_file_counts_only_eligible_jobs(monkeypatch, tmp_path):
+    artifact_file = tmp_path / "tier2_full.json"
+    artifact_file.write_text(
+        json.dumps(
+            [
+                {"description": "short"},
+                {"description": ""},
+                {"description": "x" * 600},
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(app, "ARTIFACTS_DIR", tmp_path)
+    monkeypatch.setattr(app, "_load_resume_profile", lambda: {})
+    monkeypatch.setattr(app, "_load_preferences", lambda: {})
+    monkeypatch.setattr(app, "get_avg_output_tokens", lambda kind, model, default=0: 120)
+    monkeypatch.setattr(
+        app,
+        "load_pricing",
+        lambda: {"models": {"gpt-4.1-mini": {"input": 0.4, "cached_input": 0.1, "output": 1.6}}},
+    )
+
+    out = app._estimate_ai_eval_from_file(None)
+
+    assert out["jobs_total"] == 3
+    assert out["jobs_est"] == 1
+    assert out["skipped_jobs_est"] == 2
+    assert out["output_tokens_est"] == 120
+    assert out["input_tokens_est"] > 0
+    assert out["cost_est"] is not None
+
+
+def test_ai_eval_estimate_from_file_zero_eligible_jobs_is_zero_cost(monkeypatch, tmp_path):
+    artifact_file = tmp_path / "tier2_full.json"
+    artifact_file.write_text(
+        json.dumps(
+            [
+                {"description": ""},
+                {"description": "too short"},
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(app, "ARTIFACTS_DIR", tmp_path)
+    monkeypatch.setattr(app, "_load_resume_profile", lambda: {})
+    monkeypatch.setattr(app, "_load_preferences", lambda: {})
+    monkeypatch.setattr(app, "get_avg_output_tokens", lambda kind, model, default=0: 120)
+    monkeypatch.setattr(
+        app,
+        "load_pricing",
+        lambda: {"models": {"gpt-4.1-mini": {"input": 0.4, "cached_input": 0.1, "output": 1.6}}},
+    )
+
+    out = app._estimate_ai_eval_from_file(None)
+
+    assert out["jobs_total"] == 2
+    assert out["jobs_est"] == 0
+    assert out["skipped_jobs_est"] == 2
+    assert out["input_tokens_est"] == 0
+    assert out["output_tokens_est"] == 0
+    assert out["cost_est"] == 0.0

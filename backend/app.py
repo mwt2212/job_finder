@@ -214,11 +214,10 @@ def _default_shortlist_rules() -> Dict[str, Any]:
 
 
 def _default_searches() -> Dict[str, Any]:
-    location = "Chicago, IL"
     return {
         "Chicago": {
-            "url": linkedin_url_for_search("Chicago", location),
-            "location_label": location,
+            "url": linkedin_url_for_search("Chicago", "Chicago, IL"),
+            "location_label": "Chicago, IL",
             "schema_version": "1.0",
         }
     }
@@ -1316,9 +1315,14 @@ def _estimate_ai_eval_from_file(model_override: Optional[str] = None) -> Dict[st
     except Exception:
         raise HTTPException(status_code=400, detail="Failed to read tier2_full.json")
 
-    job_count = len(data)
+    total_jobs = len(data)
     avg_desc_chars = 4800
-    desc_lengths = [len((j.get("description") or "")) for j in data if (j.get("description") or "").strip()]
+    desc_lengths = []
+    for job in data:
+        cleaned = clean_job_description(str(job.get("description") or ""))
+        if len(cleaned) >= 200:
+            desc_lengths.append(len(cleaned))
+    job_count = len(desc_lengths)
     if desc_lengths:
         avg_desc_chars = int(sum(desc_lengths) / len(desc_lengths))
 
@@ -1356,7 +1360,7 @@ Return ONLY a JSON array that matches the schema, in the same order as the jobs 
     }
     per_job_tokens = estimate_tokens(json.dumps(sample_job, ensure_ascii=False))
     batch_size = AI_EVAL_DEFAULT_BATCH
-    batches = max(1, (job_count + batch_size - 1) // batch_size)
+    batches = (job_count + batch_size - 1) // batch_size if job_count > 0 else 0
     input_tokens_est = batches * base_tokens + job_count * per_job_tokens
 
     model = (model_override or "").strip() or "gpt-4.1-mini"
@@ -1370,7 +1374,9 @@ Return ONLY a JSON array that matches the schema, in the same order as the jobs 
     return {
         "model": model,
         "jobs_est": job_count,
-        "jobs_max": job_count,
+        "jobs_max": total_jobs,
+        "jobs_total": total_jobs,
+        "skipped_jobs_est": max(0, total_jobs - job_count),
         "input_tokens_est": input_tokens_est,
         "output_tokens_est": output_tokens_est,
         "cost_est": cost_est,
