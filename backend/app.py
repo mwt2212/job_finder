@@ -78,6 +78,7 @@ from backend.onboarding_validate import (
 from backend.onboarding_migrate import migrate_config_file
 from backend.api.router import api_router
 from backend.api.run_state import RUN_STATE
+from backend.domain.services import ai_service, cover_letter_service, onboarding_service, pipeline_service, tuning_service
 
 try:
     from openai import OpenAI  # type: ignore
@@ -460,7 +461,12 @@ def _onboarding_validation_snapshot() -> Dict[str, Any]:
     preferences_data = _load_preferences()
     rules_data = _load_rules()
     searches_data = _load_searches_raw()
-    return validate_all(resume_data, preferences_data, rules_data, searches_data)
+    return onboarding_service.onboarding_validation_snapshot(
+        resume_data,
+        preferences_data,
+        rules_data,
+        searches_data,
+    )
 
 
 def _onboarding_status_payload() -> Dict[str, Any]:
@@ -845,37 +851,7 @@ def _call_model(prompt: str, model: str) -> Dict[str, Any]:
 
 
 def _cover_letter_prompt(job: Dict[str, Any], resume: Dict[str, Any], feedback: str) -> str:
-    feedback_line = f"\nFeedback from candidate to adjust tone/content:\n{feedback}\n" if feedback else ""
-    return f"""
-Write a short, 3-paragraph cover letter tailored to this role.
-
-Constraints:
-- Keep it concise (3 short paragraphs).
-- Highlight transferable skills, avoid sales-heavy emphasis.
-- Only emphasize experience/skills that are reasonably applicable to this role; do not stretch.
-- If there are gaps, briefly soften them with a positive, forward-looking sentence (without exaggeration).
-- Keep the tone human and natural; no filler or generic fluff.
-- The candidate has already graduated (August 2025). Do not say "graduating" or imply they are still in school.
-- Be less verbose and avoid em dashes entirely.
-- Use a predictable 3-paragraph structure:
-  1) Opening: role interest + quick fit hook.
-  2) Middle: 2-3 concrete, relevant strengths tied to the job.
-  3) Closing: gratitude + interest in next steps.
-- Always include a brief thank-you in the closing.
-
-Candidate profile:
-{json.dumps(resume, ensure_ascii=False)}
-
-Job:
-Title: {job.get('title','')}
-Company: {job.get('company','')}
-Location: {job.get('location','')}
-Workplace: {job.get('workplace','')}
-Description:
-{job.get('description','') or job.get('raw_card_text','')}
-{feedback_line}
-Return only the cover letter text.
-""".strip()
+    return cover_letter_service.cover_letter_prompt(job, resume, feedback)
 
 
 DATE_RE = re.compile(
@@ -892,33 +868,11 @@ def _current_date_str() -> str:
 
 
 def _split_blocks(text: str) -> List[str]:
-    if not text:
-        return []
-    blocks = re.split(r"\n\s*\n+", text)
-    return [b.strip() for b in blocks if b.strip()]
+    return cover_letter_service.split_blocks(text)
 
 
 def _split_cover_sections(text: str) -> Dict[str, Any]:
-    blocks = _split_blocks(text)
-    greeting_idx = None
-    signature_idx = None
-    for i, block in enumerate(blocks):
-        first_line = (block.splitlines()[0] if block.splitlines() else "").strip()
-        if greeting_idx is None and GREETING_RE.match(first_line or ""):
-            greeting_idx = i
-        if signature_idx is None and SIGNATURE_RE.match(first_line or ""):
-            signature_idx = i
-
-    if greeting_idx is not None and signature_idx is not None and signature_idx < greeting_idx:
-        signature_idx = None
-
-    header = blocks[:greeting_idx] if greeting_idx is not None else []
-    greeting = blocks[greeting_idx] if greeting_idx is not None else ""
-    body_start = greeting_idx + 1 if greeting_idx is not None else 0
-    body_end = signature_idx if signature_idx is not None else len(blocks)
-    body = blocks[body_start:body_end]
-    signature = blocks[signature_idx:] if signature_idx is not None else []
-    return {"header": header, "greeting": greeting, "body": body, "signature": signature}
+    return cover_letter_service.split_cover_sections(text)
 
 
 def _apply_date_and_company_to_header(
@@ -956,27 +910,7 @@ def _assemble_cover_letter(
     ensure_date: bool,
     company: str,
 ) -> str:
-    header = _apply_date_and_company_to_header(sections.get("header", []), ensure_date, company)
-    greeting = sections.get("greeting") or ""
-    signature = sections.get("signature") or []
-
-    parts: List[str] = []
-    parts.extend([h for h in header if h.strip()])
-    if greeting.strip():
-        # Extra newline after company block before greeting
-        parts.append("")
-        parts.append(greeting.strip())
-    indented_body = []
-    for p in body_paragraphs:
-        text = str(p).strip()
-        if text:
-            indented_body.append("    " + text)
-    parts.extend(indented_body)
-    if signature:
-        # Extra newline before sign-off
-        parts.append("")
-        parts.extend([s for s in signature if str(s).strip()])
-    return "\n\n".join(parts).strip()
+    return cover_letter_service.assemble_cover_letter(sections, body_paragraphs, ensure_date, company)
 
 
 def _safe_filename(text: str) -> str:
@@ -1073,19 +1007,7 @@ def _split_cover_sections_from_text(text: str) -> Dict[str, Any]:
 
 
 def _parse_model_paragraphs(text: str) -> List[str]:
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
-        cleaned = re.sub(r"\s*```$", "", cleaned)
-        cleaned = cleaned.strip()
-    try:
-        data = json.loads(cleaned)
-        paragraphs = data.get("paragraphs")
-        if isinstance(paragraphs, list):
-            return [str(p).strip() for p in paragraphs if str(p).strip()]
-    except Exception:
-        pass
-    return _split_blocks(text)
+    return cover_letter_service.parse_model_paragraphs(text)
 
 
 def _cover_letter_prompt_locked(
@@ -1095,43 +1017,13 @@ def _cover_letter_prompt_locked(
     body_seeds: List[str],
     locked_map: Dict[int, str],
 ) -> str:
-    feedback_line = f"\nFeedback from candidate to adjust tone/content:\n{feedback}\n" if feedback else ""
-    locked_indices = sorted(locked_map.keys())
-    title = job.get("title", "") or ""
-    short_title = re.split(r"\s*[,/|–-]\s*", title)[0] if title else ""
-    return f"""
-Write the body of a cover letter with exactly {len(body_seeds)} paragraphs.
-
-Locked paragraph indices (0-based): {json.dumps(locked_indices)}.
-Seed paragraphs (0-based array): {json.dumps(body_seeds, ensure_ascii=False)}.
-Locked paragraph text (index -> paragraph): {json.dumps(locked_map, ensure_ascii=False)}.
-
-Rules:
-- Return JSON only: {{"paragraphs": ["p1", "p2", "..."]}}
-- The array length MUST be exactly {len(body_seeds)}.
-- Locked paragraphs must be copied verbatim with identical wording and punctuation.
-- Unlocked paragraphs should be rewritten from their seed text while improving flow and relevance.
-- Use locked paragraphs as context to keep cohesion and avoid contradictions.
-- No bullets; plain paragraphs only.
-- Keep it concise, human, and professional. No fluff.
-- Avoid em dashes entirely.
-- The candidate has already graduated (August 2025). Do not imply they are still in school.
-- Structure: Opening (interest + fit), Body (concrete strengths), Closing (gratitude + next steps + brief thank-you).
-- Prefer a concise role title; if the job title is long or has commas/slashes, use a shortened form.
-
-Candidate profile:
-{json.dumps(resume, ensure_ascii=False)}
-
-Job:
-Title: {title}
-Short title (if needed): {short_title}
-Company: {job.get('company','')}
-Location: {job.get('location','')}
-Workplace: {job.get('workplace','')}
-Description:
-{job.get('description','') or job.get('raw_card_text','')}
-{feedback_line}
-""".strip()
+    return cover_letter_service.cover_letter_prompt_locked(
+        job,
+        resume,
+        feedback,
+        body_seeds,
+        locked_map,
+    )
 
 
 def _estimate_cover_letter(
@@ -1153,91 +1045,35 @@ def _estimate_cover_letter(
     if not body_seeds:
         body_seeds = ["", "", ""]
 
-    locked_indices = sorted(set(payload.locked_indices or []))
-    locked_indices = [i for i in locked_indices if 0 <= i < len(body_seeds)]
-    locked_map = {i: body_seeds[i] for i in locked_indices}
-
-    prompt = _cover_letter_prompt_locked(job, resume, payload.feedback or "", body_seeds, locked_map)
-    input_tokens_est = estimate_tokens(prompt)
-    output_tokens_est = get_avg_output_tokens("cover_letter", model, default=350)
-
-    pricing = load_pricing()
-    cost_est = estimate_cost(pricing, model, input_tokens_est, output_tokens_est) if pricing else None
-    cost_range = estimate_cost_range(pricing, model, input_tokens_est, output_tokens_est) if pricing else {"low": None, "high": None}
-    return {
-        "model": model,
-        "input_tokens_est": input_tokens_est,
-        "output_tokens_est": output_tokens_est,
-        "cost_est": cost_est,
-        "cost_est_range": cost_range,
-    }
+    return cover_letter_service.estimate_cover_letter(
+        job,
+        resume,
+        payload.feedback or "",
+        model,
+        body_seeds,
+        payload.locked_indices or [],
+    )
 
 
 def _estimate_ai_eval(size: str, model_override: Optional[str] = None) -> Dict[str, Any]:
-    cfg = SIZE_PRESETS.get(size)
-    if not cfg:
-        raise HTTPException(status_code=400, detail="Invalid size")
-
-    final_top = int(cfg.get("final_top") or 0)
-    job_count = final_top
-    avg_desc_chars = 4800
-
     resume = _load_resume_profile()
     prefs = _evaluation_preferences_payload(_load_preferences())
-    base_prompt = f"""
-You are evaluating job fit for a candidate. Be strict and practical.
-
-Candidate profile (truth source):
-{json.dumps(resume, ensure_ascii=False)}
-
-Preferences profile:
-{json.dumps(prefs, ensure_ascii=False)}
-
-Jobs to evaluate (array, in order):
-[]
-
-Rules:
-- Candidate strongly prefers minimal cold calling. If outbound-heavy or sales-centric, cold_call_risk=high and next_action=skip.
-- Must be full-time. If unclear, employment_type_ok=false and next_action=review_manually.
-- Hybrid preferred; remote acceptable; onsite only if standout.
-- Upward mobility: favor analyst/ops/compliance/data-adjacent roles with transferable skills.
-- Include job_summary: 1-2 sentences on what the role is about.
-Return ONLY a JSON array that matches the schema, in the same order as the jobs list.
-""".strip()
-    base_tokens = estimate_tokens(base_prompt)
-    sample_job = {
-        "url": "https://example.com",
-        "title": "Example Title",
-        "company": "Example Co",
-        "workplace": "remote",
-        "posted": "1 day ago",
-        "salary_hint": "",
-        "description": "x" * avg_desc_chars,
-    }
-    per_job_tokens = estimate_tokens(json.dumps(sample_job, ensure_ascii=False))
-    batch_size = AI_EVAL_DEFAULT_BATCH
-    batches = max(1, (job_count + batch_size - 1) // batch_size)
-    input_tokens_est = batches * base_tokens + job_count * per_job_tokens
-
-    model = (model_override or "").strip() or "gpt-4.1-mini"
-    output_per_job = get_avg_output_tokens("ai_eval", model, default=450)
-    output_tokens_est = output_per_job * job_count
-
-    pricing = load_pricing()
-    cost_est = estimate_cost(pricing, model, input_tokens_est, output_tokens_est) if pricing else None
-    cost_range = estimate_cost_range(pricing, model, input_tokens_est, output_tokens_est) if pricing else {"low": None, "high": None}
-
-    return {
-        "model": model,
-        "jobs_est": job_count,
-        "jobs_max": final_top,
-        "input_tokens_est": input_tokens_est,
-        "output_tokens_est": output_tokens_est,
-        "cost_est": cost_est,
-        "cost_est_range": cost_range,
-        "avg_desc_chars": avg_desc_chars,
-        "batch_size": batch_size,
-    }
+    try:
+        return ai_service.estimate_ai_eval(
+            size,
+            SIZE_PRESETS,
+            resume,
+            prefs,
+            model_override=model_override,
+            batch_size=AI_EVAL_DEFAULT_BATCH,
+            estimate_tokens_fn=estimate_tokens,
+            get_avg_output_tokens_fn=get_avg_output_tokens,
+            load_pricing_fn=load_pricing,
+            estimate_cost_fn=estimate_cost,
+            estimate_cost_range_fn=estimate_cost_range,
+        )
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid size")
 
 
 def _estimate_ai_eval_from_file(model_override: Optional[str] = None) -> Dict[str, Any]:
@@ -1262,62 +1098,20 @@ def _estimate_ai_eval_from_file(model_override: Optional[str] = None) -> Dict[st
 
     resume = _load_resume_profile()
     prefs = _evaluation_preferences_payload(_load_preferences())
-    base_prompt = f"""
-You are evaluating job fit for a candidate. Be strict and practical.
-
-Candidate profile (truth source):
-{json.dumps(resume, ensure_ascii=False)}
-
-Preferences profile:
-{json.dumps(prefs, ensure_ascii=False)}
-
-Jobs to evaluate (array, in order):
-[]
-
-Rules:
-- Candidate strongly prefers minimal cold calling. If outbound-heavy or sales-centric, cold_call_risk=high and next_action=skip.
-- Must be full-time. If unclear, employment_type_ok=false and next_action=review_manually.
-- Hybrid preferred; remote acceptable; onsite only if standout.
-- Upward mobility: favor analyst/ops/compliance/data-adjacent roles with transferable skills.
-- Include job_summary: 1-2 sentences on what the role is about.
-Return ONLY a JSON array that matches the schema, in the same order as the jobs list.
-""".strip()
-    base_tokens = estimate_tokens(base_prompt)
-    sample_job = {
-        "url": "https://example.com",
-        "title": "Example Title",
-        "company": "Example Co",
-        "workplace": "remote",
-        "posted": "1 day ago",
-        "salary_hint": "",
-        "description": "x" * avg_desc_chars,
-    }
-    per_job_tokens = estimate_tokens(json.dumps(sample_job, ensure_ascii=False))
-    batch_size = AI_EVAL_DEFAULT_BATCH
-    batches = (job_count + batch_size - 1) // batch_size if job_count > 0 else 0
-    input_tokens_est = batches * base_tokens + job_count * per_job_tokens
-
-    model = (model_override or "").strip() or "gpt-4.1-mini"
-    output_per_job = get_avg_output_tokens("ai_eval", model, default=450)
-    output_tokens_est = output_per_job * job_count
-
-    pricing = load_pricing()
-    cost_est = estimate_cost(pricing, model, input_tokens_est, output_tokens_est) if pricing else None
-    cost_range = estimate_cost_range(pricing, model, input_tokens_est, output_tokens_est) if pricing else {"low": None, "high": None}
-
-    return {
-        "model": model,
-        "jobs_est": job_count,
-        "jobs_max": total_jobs,
-        "jobs_total": total_jobs,
-        "skipped_jobs_est": max(0, total_jobs - job_count),
-        "input_tokens_est": input_tokens_est,
-        "output_tokens_est": output_tokens_est,
-        "cost_est": cost_est,
-        "cost_est_range": cost_range,
-        "avg_desc_chars": avg_desc_chars,
-        "batch_size": batch_size,
-    }
+    return ai_service.estimate_ai_eval_from_jobs(
+        total_jobs=total_jobs,
+        job_count=job_count,
+        avg_desc_chars=avg_desc_chars,
+        resume=resume,
+        prefs=prefs,
+        model_override=model_override,
+        batch_size=AI_EVAL_DEFAULT_BATCH,
+        estimate_tokens_fn=estimate_tokens,
+        get_avg_output_tokens_fn=get_avg_output_tokens,
+        load_pricing_fn=load_pricing,
+        estimate_cost_fn=estimate_cost,
+        estimate_cost_range_fn=estimate_cost_range,
+    )
 
 
 def _load_templates() -> Dict[str, Any]:
@@ -2154,31 +1948,19 @@ def _update_progress_from_line(step: str, line: str) -> None:
 
 
 def _script_args(step: str, search: Optional[str], query: Optional[str] = None) -> List[str]:
-    script = _script_path(step)
-    args = [str(script)]
-    if step == "scout" and search:
-        args.extend(["--search", search])
-    if step == "scout" and query:
-        args.extend(["--query", query])
-    return args
+    return pipeline_service.script_args(step, search, query, _script_path)
 
 
 def _script_args_with_size(step: str, search: str, size: str, query: str, eval_model: Optional[str] = None) -> List[str]:
-    cfg = SIZE_PRESETS[size]
-    args = _script_args(step, search, query)
-    if step == "scout":
-        args.extend(["--max-results", str(cfg["max_results"])])
-    if step == "shortlist":
-        args.extend(["--target-n", str(cfg["shortlist_k"])])
-    if step == "scrape":
-        args.extend(["--limit", str(cfg["final_top"])])
-    if step == "eval":
-        args.extend(["--limit", str(cfg["final_top"])])
-        if eval_model:
-            args.extend(["--model", eval_model])
-    if step == "sort":
-        args.extend(["--final-top", str(cfg["final_top"])])
-    return args
+    return pipeline_service.script_args_with_size(
+        step,
+        search,
+        size,
+        query,
+        SIZE_PRESETS,
+        _script_path,
+        eval_model=eval_model,
+    )
 
 
 def _run_pipeline_thread(search: str, size: str, query: str, eval_model: Optional[str] = None) -> None:
@@ -2439,12 +2221,7 @@ def import_buckets(paths: Dict[str, Path]) -> Dict[str, int]:
 
 
 def _generate_suggestions(prefs: Dict[str, Any]) -> List[Dict[str, Any]]:
-    suggestions: List[Dict[str, Any]] = []
-
-    # Basic heuristic: if many low-rated jobs mention healthcare, suggest adding it
     from backend.db import _connect
-
-    healthcare_terms = ["health", "medical", "hospital", "clinic"]
 
     with _connect() as conn:
         rows = conn.execute(
@@ -2456,51 +2233,12 @@ def _generate_suggestions(prefs: Dict[str, Any]) -> List[Dict[str, Any]]:
             """
         ).fetchall()
 
-    if rows:
-        low_total = len(rows)
-        health_hits = 0
-        for row in rows:
-            blob = " ".join([row["title"] or "", row["company"] or "", row["description"] or ""]).lower()
-            if any(term in blob for term in healthcare_terms):
-                health_hits += 1
-
-        if health_hits / low_total >= 0.2:
-            existing = set(
-                (prefs.get("industry_preferences", {}) or {}).get("soft_penalize", [])
-            )
-            if "healthcare" not in existing:
-                suggestions.append(
-                    {
-                        "op": "add",
-                        "path": "industry_preferences.soft_penalize",
-                        "value": "healthcare",
-                        "reason": "Many low-rated jobs appear healthcare-related; add soft penalty.",
-                    }
-                )
-
-    return suggestions
+    mapped_rows = [{"title": r["title"], "company": r["company"], "description": r["description"]} for r in rows]
+    return tuning_service.generate_suggestions_from_low_rated_rows(prefs, mapped_rows)
 
 
 def _apply_op(prefs: Dict[str, Any], op: Dict[str, Any]) -> None:
-    path = op.get("path", "")
-    value = op.get("value")
-    if not path:
-        return
-    parts = path.split(".")
-    cur = prefs
-    for part in parts[:-1]:
-        if part not in cur or not isinstance(cur[part], dict):
-            cur[part] = {}
-        cur = cur[part]
-
-    key = parts[-1]
-    if op.get("op") == "add":
-        if key not in cur or not isinstance(cur[key], list):
-            cur[key] = []
-        if value not in cur[key]:
-            cur[key].append(value)
-    elif op.get("op") == "set":
-        cur[key] = value
+    tuning_service.apply_operation(prefs, op)
 
 
 def _auto_tune_from_shortlist(job_id: int, verdict: str, reason: str) -> None:
