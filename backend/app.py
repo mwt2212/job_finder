@@ -76,6 +76,8 @@ from backend.onboarding_validate import (
     validate_shortlist_rules,
 )
 from backend.onboarding_migrate import migrate_config_file
+from backend.api.router import api_router
+from backend.api.run_state import RUN_STATE
 
 try:
     from openai import OpenAI  # type: ignore
@@ -752,6 +754,7 @@ async def _lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="Job Finder Dashboard", lifespan=_lifespan)
+app.include_router(api_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -767,15 +770,6 @@ async def log_requests(request: Request, call_next):
     print(f"{request.method} {request.url.path} -> {response.status_code}", flush=True)
     return response
 
-RUN_STATE = {
-    "running": False,
-    "step": None,
-    "lines": [],
-    "status": None,
-    "progress": {"current": 0, "total": 0, "pct": 0.0, "label": ""},
-    "lock": threading.Lock(),
-}
-
 SIZE_PRESETS = {
     "Test": {"max_results": 1, "shortlist_k": 1, "final_top": 1},
     "Large": {"max_results": 1000, "shortlist_k": 120, "final_top": 50},
@@ -784,12 +778,10 @@ SIZE_PRESETS = {
 }
 
 
-@app.get("/health")
 def api_health():
     return {"ok": True, "app_file": str(Path(__file__).resolve())}
 
 
-@app.get("/debug/env")
 def api_debug_env():
     return {
         "app_file": str(Path(__file__).resolve()),
@@ -1353,7 +1345,6 @@ def _find_template(templates: Dict[str, Any], template_id: str) -> Optional[Dict
     return None
 
 
-@app.get("/jobs")
 def api_list_jobs(
     search: Optional[str] = None,
     workplace: Optional[str] = None,
@@ -1391,7 +1382,6 @@ def api_list_jobs(
     )
 
 
-@app.get("/jobs/{job_id}")
 def api_get_job(job_id: int):
     job = get_job(job_id)
     if not job:
@@ -1399,7 +1389,6 @@ def api_get_job(job_id: int):
     return job
 
 
-@app.post("/ratings")
 def api_rate_job(payload: RatingIn):
     if payload.stars < 1 or payload.stars > 5:
         raise HTTPException(status_code=400, detail="Stars must be 1-5")
@@ -1407,13 +1396,11 @@ def api_rate_job(payload: RatingIn):
     return {"ok": True}
 
 
-@app.post("/status")
 def api_status(payload: StatusIn):
     upsert_status(payload.job_id, payload.status)
     return {"ok": True}
 
 
-@app.post("/feedback/shortlist")
 def api_shortlist_feedback(payload: ShortlistFeedbackIn):
     if payload.verdict not in {"keep", "remove"}:
         raise HTTPException(status_code=400, detail="Invalid verdict")
@@ -1428,7 +1415,6 @@ def api_shortlist_feedback(payload: ShortlistFeedbackIn):
     return {"ok": True, "tuned": True}
 
 
-@app.post("/feedback/ai")
 def api_ai_feedback(payload: AiEvalFeedbackIn):
     if payload.correct_bucket not in {"apply", "review", "skip"}:
         raise HTTPException(status_code=400, detail="Invalid bucket")
@@ -1442,14 +1428,12 @@ def api_ai_feedback(payload: AiEvalFeedbackIn):
     return {"ok": True, "tuned": True}
 
 
-@app.get("/settings")
 def api_get_settings():
     prefs = _load_preferences()
     rules = _load_rules()
     return {"preferences": prefs, "rules": rules}
 
 
-@app.get("/onboarding/config")
 def api_onboarding_get_config():
     return {
         "resume_profile": _load_resume_profile(),
@@ -1459,14 +1443,12 @@ def api_onboarding_get_config():
     }
 
 
-@app.put("/onboarding/config/resume-profile")
 def api_onboarding_put_resume_profile(payload: Dict[str, Any]):
     validation = _validate_or_400(validate_resume_profile(payload or {}))
     _save_json(RESUME_LOCAL_PATH, payload or {})
     return {"ok": True, "path": str(RESUME_LOCAL_PATH), "validation": validation}
 
 
-@app.put("/onboarding/config/preferences")
 def api_onboarding_put_preferences(payload: Dict[str, Any]):
     validation = _validate_or_400(validate_preferences(payload or {}))
     write_path = _preferences_write_path()
@@ -1474,7 +1456,6 @@ def api_onboarding_put_preferences(payload: Dict[str, Any]):
     return {"ok": True, "path": str(write_path), "validation": validation}
 
 
-@app.put("/onboarding/config/shortlist-rules")
 def api_onboarding_put_shortlist_rules(payload: Dict[str, Any]):
     validation = _validate_or_400(validate_shortlist_rules(payload or {}))
     write_path = _rules_write_path()
@@ -1482,7 +1463,6 @@ def api_onboarding_put_shortlist_rules(payload: Dict[str, Any]):
     return {"ok": True, "path": str(write_path), "validation": validation}
 
 
-@app.put("/onboarding/config/searches")
 def api_onboarding_put_searches(payload: Any):
     searches = _normalize_searches_payload(payload)
     validation = _validate_or_400(validate_searches(searches))
@@ -1490,7 +1470,6 @@ def api_onboarding_put_searches(payload: Any):
     return {"ok": True, "path": str(_searches_write_path()), "validation": validation}
 
 
-@app.post("/onboarding/profile-draft")
 def api_onboarding_profile_draft(payload: OnboardingProfileDraftIn):
     text = (payload.text or "").strip()
     if not text:
@@ -1498,7 +1477,6 @@ def api_onboarding_profile_draft(payload: OnboardingProfileDraftIn):
     return _build_profile_draft_from_text(text)
 
 
-@app.post("/onboarding/resume-parse")
 async def api_onboarding_resume_parse(file: UploadFile = File(...)):
     filename = file.filename or "resume"
     raw = await file.read()
@@ -1526,14 +1504,12 @@ async def api_onboarding_resume_parse(file: UploadFile = File(...)):
     return {"filename": filename, "extracted_chars": len(text), "draft": draft}
 
 
-@app.get("/onboarding/searches")
 def api_onboarding_get_searches():
     searches = _load_searches_map()
     items = [_search_to_item(label, cfg) for label, cfg in searches.items()]
     return {"items": items}
 
 
-@app.post("/onboarding/searches")
 def api_onboarding_create_search(payload: OnboardingSearchIn):
     label = payload.label.strip()
     if not label:
@@ -1547,7 +1523,6 @@ def api_onboarding_create_search(payload: OnboardingSearchIn):
     return {"ok": True, "item": _search_to_item(label, searches[label]), "validation": validation}
 
 
-@app.put("/onboarding/searches/{label}")
 def api_onboarding_update_search(label: str, payload: OnboardingSearchUpdateIn):
     name = label.strip()
     if not name:
@@ -1570,7 +1545,6 @@ def api_onboarding_update_search(label: str, payload: OnboardingSearchUpdateIn):
     return {"ok": True, "item": _search_to_item(target_label, updated), "validation": validation}
 
 
-@app.delete("/onboarding/searches/{label}")
 def api_onboarding_delete_search(label: str):
     name = label.strip()
     searches = _load_searches_map()
@@ -1582,7 +1556,6 @@ def api_onboarding_delete_search(label: str):
     return {"ok": True, "validation": validation}
 
 
-@app.get("/onboarding/linkedin/status")
 def api_onboarding_linkedin_status():
     profile = _resolve_chrome_profile()
     check = _check_linkedin_session()
@@ -1595,7 +1568,6 @@ def api_onboarding_linkedin_status():
     }
 
 
-@app.post("/onboarding/linkedin/init")
 def api_onboarding_linkedin_init():
     profile = _resolve_chrome_profile()
     script_path = BASE_DIR / "setup-linkedin-profile.py"
@@ -1612,41 +1584,34 @@ def api_onboarding_linkedin_init():
     }
 
 
-@app.post("/onboarding/bootstrap")
 def api_onboarding_bootstrap():
     return _bootstrap_required_files()
 
 
-@app.get("/onboarding/status")
 def api_onboarding_status():
     return _onboarding_status_payload()
 
 
-@app.post("/onboarding/validate/resume-profile")
 def api_onboarding_validate_resume_profile(payload: Dict[str, Any]):
     ok, errors, warnings = validate_resume_profile(payload or {})
     return {"ok": ok, "errors": errors, "warnings": warnings}
 
 
-@app.post("/onboarding/validate/preferences")
 def api_onboarding_validate_preferences(payload: Dict[str, Any]):
     ok, errors, warnings = validate_preferences(payload or {})
     return {"ok": ok, "errors": errors, "warnings": warnings}
 
 
-@app.post("/onboarding/validate/shortlist-rules")
 def api_onboarding_validate_shortlist_rules(payload: Dict[str, Any]):
     ok, errors, warnings = validate_shortlist_rules(payload or {})
     return {"ok": ok, "errors": errors, "warnings": warnings}
 
 
-@app.post("/onboarding/validate/searches")
 def api_onboarding_validate_searches(payload: Any):
     ok, errors, warnings = validate_searches(payload)
     return {"ok": ok, "errors": errors, "warnings": warnings}
 
 
-@app.post("/onboarding/preflight")
 def api_onboarding_preflight():
     checks: List[Dict[str, str]] = []
 
@@ -1712,7 +1677,6 @@ def api_onboarding_preflight():
     return {"ready": all(c["status"] == "pass" for c in checks), "checks": checks, "validation": validation}
 
 
-@app.post("/onboarding/migrate")
 def api_onboarding_migrate():
     targets = [
         ("resume_profile", _resume_user_path()),
@@ -1743,12 +1707,10 @@ def api_onboarding_migrate():
     }
 
 
-@app.get("/ai/pricing")
 def api_ai_pricing():
     return load_pricing()
 
 
-@app.post("/ai/estimate/cover-letter")
 def api_ai_estimate_cover_letter(payload: CoverLetterGenerateIn):
     job = get_job(payload.job_id)
     if not job:
@@ -1758,24 +1720,20 @@ def api_ai_estimate_cover_letter(payload: CoverLetterGenerateIn):
     return _estimate_cover_letter(job, resume, payload, model)
 
 
-@app.post("/ai/estimate/pipeline")
 def api_ai_estimate_pipeline(payload: AiEstimatePipelineIn):
     return _estimate_ai_eval(payload.size, payload.model)
 
 
-@app.post("/ai/estimate/eval")
 def api_ai_estimate_eval(payload: Optional[AiEstimatePipelineIn] = None):
     model = payload.model if payload else None
     return _estimate_ai_eval_from_file(model)
 
 
-@app.get("/cover-letter-templates")
 def api_cover_letter_templates():
     data = _load_templates()
     return {"items": data.get("templates") or []}
 
 
-@app.post("/cover-letter-templates")
 def api_cover_letter_template_create(payload: CoverLetterTemplateIn):
     data = _load_templates()
     items = data.get("templates") or []
@@ -1792,7 +1750,6 @@ def api_cover_letter_template_create(payload: CoverLetterTemplateIn):
     return {"ok": True, "item": item}
 
 
-@app.put("/cover-letter-templates/{template_id}")
 def api_cover_letter_template_update(template_id: str, payload: CoverLetterTemplateIn):
     data = _load_templates()
     item = _find_template(data, template_id)
@@ -1804,7 +1761,6 @@ def api_cover_letter_template_update(template_id: str, payload: CoverLetterTempl
     return {"ok": True, "item": item}
 
 
-@app.delete("/cover-letter-templates/{template_id}")
 def api_cover_letter_template_delete(template_id: str):
     data = _load_templates()
     items = data.get("templates") or []
@@ -1816,12 +1772,10 @@ def api_cover_letter_template_delete(template_id: str):
     return {"ok": True}
 
 
-@app.get("/cover-letters/{job_id}")
 def api_cover_letters(job_id: int):
     return {"items": list_cover_letters(job_id)}
 
 
-@app.post("/cover-letters/generate")
 def api_cover_letter_generate(payload: CoverLetterGenerateIn):
     job = get_job(payload.job_id)
     if not job:
@@ -1910,7 +1864,6 @@ def api_cover_letter_generate(payload: CoverLetterGenerateIn):
     return {"ok": True, "id": cover_id}
 
 
-@app.post("/cover-letters/save")
 def api_cover_letter_save(payload: CoverLetterSaveIn):
     existing = get_cover_letter(payload.id)
     if not existing:
@@ -1919,7 +1872,6 @@ def api_cover_letter_save(payload: CoverLetterSaveIn):
     return {"ok": True}
 
 
-@app.get("/cover-letters/export/{cover_id}")
 def api_cover_letter_export(cover_id: int, format: str = "txt"):
     letter = get_cover_letter(cover_id)
     if not letter:
@@ -1994,14 +1946,12 @@ def api_cover_letter_export(cover_id: int, format: str = "txt"):
     raise HTTPException(status_code=400, detail="Unsupported format")
 
 
-@app.get("/searches")
 def api_get_searches():
     searches = _load_searches_map()
     items = [_search_to_item(label, cfg) for label, cfg in searches.items()]
     return {"searches": items}
 
 
-@app.put("/settings")
 def api_put_settings(payload: Dict[str, Any]):
     prefs = payload.get("preferences")
     rules = payload.get("rules")
@@ -2012,7 +1962,6 @@ def api_put_settings(payload: Dict[str, Any]):
     return {"ok": True}
 
 
-@app.post("/run/start")
 def api_run_start(payload: StartIn):
     if payload.size not in SIZE_PRESETS:
         raise HTTPException(status_code=400, detail="Invalid size")
@@ -2059,7 +2008,6 @@ def api_run_start(payload: StartIn):
     return {"ok": True, "status": "started"}
 
 
-@app.post("/run/{step}")
 def api_run_step(step: str, search: Optional[str] = None, query: Optional[str] = None, model: Optional[str] = None):
     if step not in SCRIPT_NAMES:
         raise HTTPException(status_code=400, detail="Invalid step")
@@ -2097,7 +2045,6 @@ def api_run_step(step: str, search: Optional[str] = None, query: Optional[str] =
     return {"ok": True, "status": "started"}
 
 
-@app.get("/runs/stream")
 def api_stream_runs():
     def event_stream() -> Iterator[str]:
         cursor = 0
@@ -2119,7 +2066,6 @@ def api_stream_runs():
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
-@app.get("/runs/state")
 def api_run_state():
     with RUN_STATE["lock"]:
         return {
@@ -2289,21 +2235,18 @@ def _run_pipeline_thread(search: str, size: str, query: str, eval_model: Optiona
 
 
 
-@app.post("/import")
 def api_import(payload: ImportIn):
     sources = payload.sources or []
     counts = import_all(sources)
     return {"ok": True, "counts": counts}
 
 
-@app.post("/suggestions/generate")
 def api_generate_suggestions():
     prefs = _load_preferences()
     suggestions = _generate_suggestions(prefs)
     return {"suggestions": suggestions}
 
 
-@app.post("/suggestions/apply")
 def api_apply_suggestions(payload: SuggestionsApplyIn):
     prefs = _load_preferences()
     for op in payload.operations:
