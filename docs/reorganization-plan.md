@@ -29,6 +29,7 @@ Use this section as source of truth when resuming in a future session.
   - `ai-eval.py`
   - `sort-results.py`
 - Run state is global and lock-protected (`RUN_STATE`) with SSE stream at `/runs/stream`.
+- Starting pipeline or running scout no longer mutates `preferences.json` location fields.
 
 ### Config and Data Contract
 - Config precedence (where implemented): `*.local.json -> *.json -> *.example.json`
@@ -39,6 +40,8 @@ Use this section as source of truth when resuming in a future session.
   - `resume_profile*.json`
   - `cover_letter_templates*.json`
 - Runtime outputs live under `artifacts/`.
+- Location is no longer an evaluation preference factor in `preferences.search_filters`.
+- City selection should be handled via `searches` entries (`label`, `url`, `location_label`).
 
 ### API Surface Contract (Must Not Change)
 - Health/debug: `/health`, `/debug/env`
@@ -53,9 +56,17 @@ Use this section as source of truth when resuming in a future session.
 ### Test Baseline
 - Backend tests currently expected:
   - `pytest -q backend/tests`
+  - Current baseline: `49 passed` (as of latest update)
+- Backend test modules:
+  - `backend/tests/test_ai_usage.py`
+  - `backend/tests/test_api_routes.py`
+  - `backend/tests/test_cover_letters_api.py`
+  - `backend/tests/test_onboarding.py`
+  - `backend/tests/test_pipeline.py`
+  - `backend/tests/test_runs_import_suggestions_api.py`
 
 ### Current Reorg Status Tracker
-- Stage 0: `not_started`
+- Stage 0: `completed`
 - Stage 1: `not_started`
 - Stage 2: `not_started`
 - Stage 3: `not_started`
@@ -130,6 +141,16 @@ Do not create commits automatically.
   - `backend/tests/test_onboarding.py`
   - `backend/tests/test_pipeline.py`
   - `backend/tests/test_ai_usage.py`
+  - `backend/tests/test_api_routes.py`
+  - `backend/tests/test_cover_letters_api.py`
+  - `backend/tests/test_runs_import_suggestions_api.py`
+
+### Known Test Gaps (Important)
+- Frontend is not covered by automated tests yet (no component/e2e coverage).
+- Live LinkedIn scraping behavior cannot be fully validated in unit tests.
+- Live OpenAI generation behavior/cost/latency cannot be fully validated in unit tests.
+- Some concurrency timing edge cases are mocked rather than stress-tested.
+- `docx`/`pdf` export paths are exercised less deeply than `txt`.
 
 ## Non-Negotiable Invariants
 - Keep all existing endpoint paths, methods, request/response shapes, and status codes.
@@ -473,3 +494,4 @@ Each commit should be independently testable and deployable.
 - Pipeline code is in dedicated modules, wrappers preserve old CLI usage.
 - All existing functionality verified with automated tests and manual smoke checks.
 - API, config precedence, and artifact outputs remain behaviorally equivalent.
+
