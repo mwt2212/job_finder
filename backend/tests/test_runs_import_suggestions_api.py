@@ -43,9 +43,12 @@ def test_run_start_validation_and_success(app_ctx, monkeypatch):
     with app_ctx.app.RUN_STATE["lock"]:
         app_ctx.app.RUN_STATE["running"] = False
 
+    before_prefs = app_ctx.prefs_path.read_text(encoding="utf-8")
     ok = app_ctx.client.post("/run/start", json={"search": "Chicago", "size": "Test", "query": ""})
     assert ok.status_code == 200
     assert ok.json()["ok"] is True
+    after_prefs = app_ctx.prefs_path.read_text(encoding="utf-8")
+    assert before_prefs == after_prefs
 
     with app_ctx.app.RUN_STATE["lock"]:
         app_ctx.app.RUN_STATE["running"] = True
@@ -71,9 +74,12 @@ def test_run_step_validation_and_success(app_ctx, monkeypatch, tmp_path):
     with app_ctx.app.RUN_STATE["lock"]:
         app_ctx.app.RUN_STATE["running"] = False
 
+    before_prefs = app_ctx.prefs_path.read_text(encoding="utf-8")
     ok = app_ctx.client.post("/run/scout?search=Chicago")
     assert ok.status_code == 200
     assert ok.json()["status"] == "started"
+    after_prefs = app_ctx.prefs_path.read_text(encoding="utf-8")
+    assert before_prefs == after_prefs
 
     with app_ctx.app.RUN_STATE["lock"]:
         app_ctx.app.RUN_STATE["running"] = True

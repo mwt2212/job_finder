@@ -188,6 +188,14 @@ def resolve_prefs_path() -> Path:
     return PREFS
 
 
+def evaluation_prefs_payload(prefs: Dict[str, Any]) -> Dict[str, Any]:
+    payload = json.loads(json.dumps(prefs or {}, ensure_ascii=False))
+    search_filters = payload.get("search_filters")
+    if isinstance(search_filters, dict):
+        search_filters.pop("location_city", None)
+    return payload
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser()
@@ -209,7 +217,8 @@ def main():
         jobs = jobs[: args.limit]
     resume = json.loads(resume_path.read_text(encoding="utf-8"))
     prefs_path = resolve_prefs_path()
-    prefs = json.loads(prefs_path.read_text(encoding="utf-8")) if prefs_path.exists() else {}
+    prefs_raw = json.loads(prefs_path.read_text(encoding="utf-8")) if prefs_path.exists() else {}
+    prefs = evaluation_prefs_payload(prefs_raw)
 
     pricing = load_pricing()
     results = [None for _ in jobs]

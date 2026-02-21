@@ -2,7 +2,6 @@
   "schema_version": "1.0",
   "profile_version": "example-1",
   "search_filters": {
-    "location_city": "Example City, ST",
     "radius_miles": 10,
     "posted_within_hours": 24,
     "employment_type_required": [

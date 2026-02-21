@@ -185,3 +185,20 @@ def test_ai_eval_estimate_from_file_zero_eligible_jobs_is_zero_cost(monkeypatch,
     assert out["input_tokens_est"] == 0
     assert out["output_tokens_est"] == 0
     assert out["cost_est"] == 0.0
+
+
+def test_profile_draft_does_not_set_location_city_in_preferences():
+    out = app._build_profile_draft_from_text("Data analyst in Des Moines, IA with Python and SQL.")
+    prefs = out["preferences"]
+    search_filters = prefs.get("search_filters", {})
+    assert "location_city" not in search_filters
+
+
+def test_evaluation_preferences_payload_strips_location_city():
+    prefs = {
+        "qualification": {"min_match_score": 0.55},
+        "search_filters": {"location_city": "Chicago, IL", "radius_miles": 10, "posted_within_hours": 24},
+    }
+    cleaned = app._evaluation_preferences_payload(prefs)
+    assert "location_city" not in cleaned.get("search_filters", {})
+    assert cleaned["search_filters"]["radius_miles"] == 10

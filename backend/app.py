@@ -197,7 +197,7 @@ def _script_path(step: str) -> Path:
 def _default_preferences() -> Dict[str, Any]:
     return {
         "schema_version": "1.0",
-        "search_filters": {"location_city": "", "radius_miles": 10, "posted_within_hours": 24},
+        "search_filters": {"radius_miles": 10, "posted_within_hours": 24},
         "hard_constraints": {"min_base_salary_usd": None},
         "qualification": {"min_match_score": 0.55},
     }
@@ -624,7 +624,7 @@ def _build_profile_draft_from_text(text: str) -> Dict[str, Any]:
         "schema_version": "1.0",
         "qualification": {"min_match_score": 0.55},
         "hard_constraints": {"min_base_salary_usd": None, "no_cold_calling": True},
-        "search_filters": {"location_city": location_label, "posted_within_hours": 24, "radius_miles": 10},
+        "search_filters": {"posted_within_hours": 24, "radius_miles": 10},
     }
     shortlist_rules = {
         "schema_version": "1.0",
@@ -650,6 +650,14 @@ def _build_profile_draft_from_text(text: str) -> Dict[str, Any]:
         "confidence": confidence,
         "missing_fields_prompts": missing_prompts,
     }
+
+
+def _evaluation_preferences_payload(prefs: Dict[str, Any]) -> Dict[str, Any]:
+    payload = json.loads(json.dumps(prefs or {}, ensure_ascii=False))
+    search_filters = payload.get("search_filters")
+    if isinstance(search_filters, dict):
+        search_filters.pop("location_city", None)
+    return payload
 
 
 def _extract_text_from_upload(filename: str, content: bytes) -> str:
@@ -1249,7 +1257,7 @@ def _estimate_ai_eval(size: str, model_override: Optional[str] = None) -> Dict[s
     avg_desc_chars = 4800
 
     resume = _load_resume_profile()
-    prefs = _load_preferences()
+    prefs = _evaluation_preferences_payload(_load_preferences())
     base_prompt = f"""
 You are evaluating job fit for a candidate. Be strict and practical.
 
@@ -1327,7 +1335,7 @@ def _estimate_ai_eval_from_file(model_override: Optional[str] = None) -> Dict[st
         avg_desc_chars = int(sum(desc_lengths) / len(desc_lengths))
 
     resume = _load_resume_profile()
-    prefs = _load_preferences()
+    prefs = _evaluation_preferences_payload(_load_preferences())
     base_prompt = f"""
 You are evaluating job fit for a candidate. Be strict and practical.
 
@@ -2080,7 +2088,6 @@ def api_run_start(payload: StartIn):
     searches = _load_searches_map()
     if payload.search not in searches:
         raise HTTPException(status_code=400, detail="Invalid search")
-    _sync_search_location_preference(payload.search, searches)
     try:
         est = _estimate_ai_eval(payload.size, payload.eval_model)
         log_usage(
@@ -2141,14 +2148,6 @@ def api_run_step(step: str, search: Optional[str] = None, query: Optional[str] =
             )
         except Exception:
             pass
-    searches_path = _searches_read_path()
-    if step == "scout" and search and searches_path and searches_path.exists():
-        try:
-            searches = _load_searches_map()
-            _sync_search_location_preference(search, searches)
-        except Exception:
-            pass
-
     with RUN_STATE["lock"]:
         if RUN_STATE["running"]:
             raise HTTPException(status_code=409, detail="Another step is running")
@@ -2625,24 +2624,6 @@ def _apply_op(prefs: Dict[str, Any], op: Dict[str, Any]) -> None:
             cur[key].append(value)
     elif op.get("op") == "set":
         cur[key] = value
-
-
-def _sync_search_location_preference(search_label: str, searches: Dict[str, Any]) -> None:
-    selected = searches.get(search_label) if isinstance(searches, dict) else None
-    if not isinstance(selected, dict):
-        return
-    location_label = (selected.get("location_label") or "").strip()
-    if not location_label:
-        return
-    prefs = _load_preferences()
-    search_filters = prefs.get("search_filters")
-    if not isinstance(search_filters, dict):
-        search_filters = {}
-    if search_filters.get("location_city") == location_label:
-        return
-    search_filters["location_city"] = location_label
-    prefs["search_filters"] = search_filters
-    _save_json(_preferences_write_path(), prefs)
 
 
 def _auto_tune_from_shortlist(job_id: int, verdict: str, reason: str) -> None:

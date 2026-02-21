@@ -16,6 +16,7 @@ from backend.onboarding_validate import (
     validate_searches,
     validate_shortlist_rules,
 )
+from backend.onboarding_schema import DEFAULT_PREFERENCES
 
 
 def test_validate_resume_profile_requires_skills_and_target_roles():
@@ -23,6 +24,11 @@ def test_validate_resume_profile_requires_skills_and_target_roles():
     assert ok is False
     assert any("skills" in err for err in errors)
     assert any("target_roles" in err for err in errors)
+
+
+def test_default_preferences_no_location_city_field():
+    search_filters = DEFAULT_PREFERENCES.get("search_filters", {})
+    assert "location_city" not in search_filters
 
 
 def test_validate_preferences_min_match_range():
