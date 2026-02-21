@@ -1,0 +1,33 @@
+from backend.domain.models.dto import (
+    AiEstimatePipelineIn,
+    AiEvalFeedbackIn,
+    CoverLetterGenerateIn,
+    CoverLetterSaveIn,
+    CoverLetterTemplateIn,
+    ImportIn,
+    OnboardingProfileDraftIn,
+    OnboardingSearchIn,
+    OnboardingSearchUpdateIn,
+    RatingIn,
+    ShortlistFeedbackIn,
+    StartIn,
+    StatusIn,
+    SuggestionsApplyIn,
+)
+
+__all__ = [
+    "AiEstimatePipelineIn",
+    "AiEvalFeedbackIn",
+    "CoverLetterGenerateIn",
+    "CoverLetterSaveIn",
+    "CoverLetterTemplateIn",
+    "ImportIn",
+    "OnboardingProfileDraftIn",
+    "OnboardingSearchIn",
+    "OnboardingSearchUpdateIn",
+    "RatingIn",
+    "ShortlistFeedbackIn",
+    "StartIn",
+    "StatusIn",
+    "SuggestionsApplyIn",
+]
