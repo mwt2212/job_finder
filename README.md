@@ -45,6 +45,25 @@ Data boundaries:
 
 ## Quick Start
 
+Minimal local start (Windows):
+1. Backend setup:
+```powershell
+cd backend; python -m venv .venv; .\.venv\Scripts\Activate.ps1; pip install -r requirements.txt; python -m playwright install chromium; cd ..
+```
+2. Frontend setup:
+```powershell
+cd frontend; npm install; cd ..
+```
+3. Start backend:
+```powershell
+python run-backend.py
+```
+4. Start frontend (new terminal):
+```powershell
+cd frontend; npm run dev
+```
+Then open `http://localhost:5173` and complete Onboarding Step 1 (`bootstrap`) before pipeline runs.
+
 Backend:
 
 ```powershell
