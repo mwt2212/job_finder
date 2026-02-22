@@ -14,5 +14,9 @@
   "Des Moines": {
     "url": "https://www.linkedin.com/jobs/search/?currentJobId=4332699544&distance=10&f_E=2&f_TPR=r86400&f_WT=1%2C3&geoId=105056705&origin=JOB_SEARCH_PAGE_JOB_FILTER&sortBy=DD",
     "location_label": "Des Moines, IA"
+  },
+  "St. Petersburg": {
+    "url": "https://www.linkedin.com/jobs/search/?keywords=St.+Petersburg&location=St.+Petersburg%2C+FL&sortBy=DD",
+    "location_label": "St. Petersburg, FL"
   }
 }

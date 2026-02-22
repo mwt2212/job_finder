@@ -650,6 +650,12 @@ section {
   margin-bottom: 8px;
 }
 
+.saved.error {
+  color: #8a1f2b;
+  background: #fdecee;
+  border-color: #f2c2c8;
+}
+
 .ai-estimate {
   display: inline-flex;
   flex-wrap: wrap;
@@ -792,6 +798,31 @@ section {
   color: var(--muted);
   text-align: center;
   padding: 40px 0;
+}
+
+.helper-block {
+  color: var(--muted);
+  text-align: center;
+  padding: 10px 0;
+}
+
+.search-undo-row {
+  margin: 6px 0 10px;
+}
+
+.top-emphasis {
+  color: #111111;
+  font-weight: 700;
+}
+
+.recommend-emphasis {
+  color: #1f6b4c;
+  font-weight: 700;
+}
+
+.not-recommend-emphasis {
+  color: #8a1f2b;
+  font-weight: 700;
 }
 
 @media (max-width: 980px) {

@@ -311,6 +311,8 @@ export default function App() {
   const logSourceRef = useRef(null);
   const logCursorRef = useRef(0);
   const logRef = useRef(null);
+  const pipelineSearchTimerRef = useRef(null);
+  const pipelineUndoTimerRef = useRef(null);
   const coverEstimateTimer = useRef(null);
   const [detailSaved, setDetailSaved] = useState("");
   const [coverJobId, setCoverJobId] = useState(null);
@@ -343,6 +345,16 @@ export default function App() {
   const [profileDraftResult, setProfileDraftResult] = useState(null);
   const [resumeFile, setResumeFile] = useState(null);
   const [resumeParseMeta, setResumeParseMeta] = useState(null);
+  const [pipelineSearchState, setPipelineSearchState] = useState("");
+  const [pipelineSearchStateError, setPipelineSearchStateError] = useState(false);
+  const [pipelineDeletedSearch, setPipelineDeletedSearch] = useState(null);
+  const [pipelineSearchEditorOpen, setPipelineSearchEditorOpen] = useState(false);
+  const [pipelineSearchForm, setPipelineSearchForm] = useState({
+    label: "",
+    location_label: "",
+    keywords: "",
+    url: ""
+  });
   const [onboardingConfig, setOnboardingConfig] = useState({
     resume_profile: {},
     preferences: {},
@@ -373,6 +385,17 @@ export default function App() {
     fetchSettings();
     fetchSearches();
     fetchCoverTemplates();
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (pipelineSearchTimerRef.current) {
+        clearTimeout(pipelineSearchTimerRef.current);
+      }
+      if (pipelineUndoTimerRef.current) {
+        clearTimeout(pipelineUndoTimerRef.current);
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -858,6 +881,110 @@ export default function App() {
       .catch(() => {});
   };
 
+  const setPipelineSearchNotice = (message, { error = false, autoClearMs = null } = {}) => {
+    setPipelineSearchState(message);
+    setPipelineSearchStateError(error);
+    if (pipelineSearchTimerRef.current) {
+      clearTimeout(pipelineSearchTimerRef.current);
+      pipelineSearchTimerRef.current = null;
+    }
+    if (autoClearMs && autoClearMs > 0) {
+      pipelineSearchTimerRef.current = setTimeout(() => {
+        setPipelineSearchState("");
+        setPipelineSearchStateError(false);
+      }, autoClearMs);
+    }
+  };
+
+  const setPipelineUndoWindow = (deletedSearch) => {
+    setPipelineDeletedSearch(deletedSearch || null);
+    if (pipelineUndoTimerRef.current) {
+      clearTimeout(pipelineUndoTimerRef.current);
+      pipelineUndoTimerRef.current = null;
+    }
+    if (deletedSearch) {
+      pipelineUndoTimerRef.current = setTimeout(() => {
+        setPipelineDeletedSearch(null);
+      }, 10000);
+    }
+  };
+
+  const addPipelineSearch = () => {
+    const payload = {
+      label: String(pipelineSearchForm.label || "").trim(),
+      location_label: String(pipelineSearchForm.location_label || "").trim(),
+      keywords: String(pipelineSearchForm.keywords || "").trim(),
+      url: String(pipelineSearchForm.url || "").trim()
+    };
+    if (!payload.label || !payload.location_label) {
+      setPipelineSearchNotice("Label and location label are required.", { error: true, autoClearMs: 1500 });
+      return;
+    }
+    setPipelineSearchNotice("Adding search...");
+    fetch(`${API}/onboarding/searches`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    })
+      .then(async (r) => {
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(JSON.stringify(data.detail || data));
+        setPipelineSearchForm({ label: "", location_label: "", keywords: "", url: "" });
+        setSelectedSearch(data?.item?.label || payload.label);
+        setPipelineSearchNotice("Search added.", { autoClearMs: 1200 });
+        fetchSearches();
+      })
+      .catch((err) => setPipelineSearchNotice(`Search add failed: ${err.message}`, { error: true, autoClearMs: 1800 }));
+  };
+
+  const deletePipelineSearch = (label) => {
+    if (!label) return;
+    const deletedSearch = searches.find((s) => s.label === label) || null;
+    setPipelineSearchNotice("Removing search...");
+    fetch(`${API}/onboarding/searches/${encodeURIComponent(label)}`, { method: "DELETE" })
+      .then(async (r) => {
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(JSON.stringify(data.detail || data));
+        setPipelineSearchNotice("Search removed. You can undo for 10 seconds.", { autoClearMs: 10000 });
+        setPipelineUndoWindow(deletedSearch);
+        if (selectedSearch === label) {
+          setSelectedSearch("");
+        }
+        fetchSearches();
+      })
+      .catch((err) => setPipelineSearchNotice(`Search remove failed: ${err.message}`, { error: true, autoClearMs: 1800 }));
+  };
+
+  const undoDeletePipelineSearch = () => {
+    if (!pipelineDeletedSearch) return;
+    const payload = {
+      label: String(pipelineDeletedSearch.label || "").trim(),
+      location_label: String(pipelineDeletedSearch.location_label || "").trim(),
+      keywords: String(pipelineDeletedSearch.keywords || "").trim(),
+      url: String(pipelineDeletedSearch.url || "").trim()
+    };
+    if (!payload.label || !payload.location_label) {
+      setPipelineSearchNotice("Undo failed: deleted search data is incomplete.", { error: true, autoClearMs: 2000 });
+      setPipelineUndoWindow(null);
+      return;
+    }
+    setPipelineSearchNotice("Restoring search...");
+    fetch(`${API}/onboarding/searches`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    })
+      .then(async (r) => {
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(JSON.stringify(data.detail || data));
+        setPipelineUndoWindow(null);
+        setSelectedSearch(payload.label);
+        setPipelineSearchNotice("Search restored.", { autoClearMs: 1200 });
+        fetchSearches();
+      })
+      .catch((err) => setPipelineSearchNotice(`Search restore failed: ${err.message}`, { error: true, autoClearMs: 2200 }));
+  };
+
   const saveSettings = () => {
     setSaveState("saving");
     fetch(`${API}${EP.settings()}`, {
@@ -943,7 +1070,9 @@ export default function App() {
     const ok = window.confirm("Start a new run? This will fetch fresh jobs and update today’s data.");
     if (!ok) return;
     if (!selectedSearch) {
-      setRunLog("Please select a search before starting.\n");
+      setRunLog("Please configure a search in Onboarding Step 5 before starting.\n");
+      setTab("onboarding");
+      setOnboardingStep(5);
       return;
     }
 
@@ -2418,7 +2547,100 @@ export default function App() {
                   <option key={s.label} value={s.label}>{s.label}</option>
                 ))}
               </select>
+              {!searches.length && (
+                <div className="warning">
+                  No searches configured. Go to onboarding search setup.
+                  {" "}
+                  <button onClick={() => { setTab("onboarding"); setOnboardingStep(5); }}>
+                    Open Onboarding Step 5
+                  </button>
+                </div>
+              )}
             </div>
+            <div className="actions">
+              <button onClick={() => setPipelineSearchEditorOpen((open) => !open)}>
+                {pipelineSearchEditorOpen ? "Hide search manager" : "Manage searches"}
+              </button>
+            </div>
+            {pipelineSearchEditorOpen && (
+              <div className="panel">
+                <h3>Manage Searches</h3>
+                <div className="helper-block">
+                  Add/edit searches here anytime. Onboarding is not required after first setup.
+                </div>
+                <div className="helper-block">
+                  <strong className="top-emphasis">Recommended:</strong> use a manual LinkedIn search URL with your filters already applied, then paste it here.
+                  Useful filters include distance (ex. 5 miles), posted window (ex. past 24 hours),
+                  sort by most recent, workplace type (ex. hybrid/onsite), and experience level.
+                </div>
+                <div className="helper-block">
+                  <strong className="top-emphasis">Process:</strong> open{" "}
+                  <a href="https://www.linkedin.com/jobs/search/" target="_blank" rel="noreferrer">
+                    LinkedIn Jobs
+                  </a>
+                  , apply your filters, confirm results look right, copy the full URL
+                  from the browser address bar, then paste it into "LinkedIn URL (optional override)" below.
+                </div>
+                <div className="field">
+                  <label>Label</label>
+                  <input
+                    value={pipelineSearchForm.label}
+                    onChange={(e) => setPipelineSearchForm((prev) => ({ ...prev, label: e.target.value }))}
+                    placeholder="e.g. Chicago"
+                  />
+                </div>
+                <div className="field">
+                  <label>Location label</label>
+                  <input
+                    value={pipelineSearchForm.location_label}
+                    onChange={(e) => setPipelineSearchForm((prev) => ({ ...prev, location_label: e.target.value }))}
+                    placeholder="e.g. Chicago, IL"
+                  />
+                </div>
+                <div className="field">
+                  <label>
+                    Keywords (optional, usually <strong className="not-recommend-emphasis">not recommended</strong>)
+                  </label>
+                  <input
+                    value={pipelineSearchForm.keywords}
+                    onChange={(e) => setPipelineSearchForm((prev) => ({ ...prev, keywords: e.target.value }))}
+                    placeholder='You can leave this blank and use "Search term" at run time'
+                  />
+                </div>
+                <div className="field">
+                  <label>
+                    LinkedIn URL (optional override, <strong className="recommend-emphasis">recommended</strong>)
+                  </label>
+                  <input
+                    value={pipelineSearchForm.url}
+                    onChange={(e) => setPipelineSearchForm((prev) => ({ ...prev, url: e.target.value }))}
+                    placeholder="Leave blank to auto-build LinkedIn search URL"
+                  />
+                </div>
+                <div className="actions">
+                  <button onClick={addPipelineSearch}>Add search</button>
+                  <button onClick={fetchSearches}>Refresh list</button>
+                </div>
+                {pipelineSearchState && (
+                  <div className={pipelineSearchStateError ? "saved error" : "saved"}>{pipelineSearchState}</div>
+                )}
+                {pipelineDeletedSearch && (
+                  <div className="search-undo-row">
+                    <button className="ghost" onClick={undoDeletePipelineSearch}>
+                      Undo delete: {pipelineDeletedSearch.label}
+                    </button>
+                  </div>
+                )}
+                <ul>
+                  {searches.map((s) => (
+                    <li key={`pipeline-search-${s.label}`}>
+                      <strong>{s.label}</strong> - {s.location_label || "n/a"}
+                      <button className="ghost" onClick={() => deletePipelineSearch(s.label)}>Delete</button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <div className="field">
               <label>Search term (optional)</label>
               <input
