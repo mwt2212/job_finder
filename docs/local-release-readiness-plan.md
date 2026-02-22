@@ -61,7 +61,7 @@ Stage N complete. Continue to Stage N+1? (yes/no)
 - Stage 0: `completed`
 - Stage 1: `completed`
 - Stage 2: `completed`
-- Stage 3: `not_started`
+- Stage 3: `completed`
 - Stage 4: `not_started`
 - Stage 5: `not_started`
 - Stage 6: `not_started`

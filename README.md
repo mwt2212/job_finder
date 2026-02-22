@@ -207,6 +207,9 @@ Local/private variants (preferred for personal data):
 - `resume_profile.local.json`
 - `cover_letter_templates.local.json`
 
+Backup/restore and recovery runbook:
+- `docs/local-data-and-recovery.md`
+
 ## AI Cost Tracking
 
 - Pricing source: `ai_pricing.json`
