@@ -47,6 +47,7 @@ cd backend
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+python -m playwright install chromium
 cd ..
 python run-backend.py
 ```
@@ -61,6 +62,20 @@ npm run dev
 
 Open `http://localhost:5173`.
 
+Windows one-command setup (run once per shell):
+
+Backend setup:
+
+```powershell
+cd backend; python -m venv .venv; .\.venv\Scripts\Activate.ps1; pip install -r requirements.txt; python -m playwright install chromium; cd ..
+```
+
+Frontend setup:
+
+```powershell
+cd frontend; npm install; cd ..
+```
+
 ## Onboarding (Recommended First Run)
 
 Use the `Onboarding` tab in the dashboard to complete setup:
@@ -73,6 +88,7 @@ Use the `Onboarding` tab in the dashboard to complete setup:
 - Step 7: preflight verification before first run
 
 Pipeline start is preflight-gated. If hard checks fail, `Start` is blocked with actionable fix hints.
+For first run, execute `POST /onboarding/bootstrap` via the UI flow (Onboarding Step 1) before attempting pipeline runs.
 
 ## One-Time LinkedIn Login Setup
 
@@ -215,6 +231,10 @@ README preview image not showing on GitHub:
 
 AI calls fail:
 - Confirm `OPENAI_API_KEY` is exported in the backend shell
+
+Editor shows unresolved Python imports but backend runs:
+- This is usually VS Code using a different interpreter than your runtime shell.
+- Optional fix: `Python: Select Interpreter` and choose `backend/.venv/Scripts/python.exe`.
 
 ## Quick Reset
 
