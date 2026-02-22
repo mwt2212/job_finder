@@ -341,7 +341,7 @@ def _check_playwright_runtime() -> Dict[str, Any]:
         return {
             "ok": False,
             "message": f"Playwright import failed: {_format_exc(exc)}",
-            "fix_hint": "Install backend dependencies and run `python -m playwright install chromium`.",
+            "fix_hint": "Install backend deps in this Python env, then run `python -m playwright install chromium`.",
         }
 
     # Validate in a subprocess to avoid backend event-loop limitations on Windows
@@ -365,20 +365,20 @@ def _check_playwright_runtime() -> Dict[str, Any]:
             return {
                 "ok": False,
                 "message": f"Playwright runtime check failed in subprocess: {err or f'exit={proc.returncode}'}",
-                "fix_hint": "Run `python -m playwright install chromium` and ensure Playwright can run from this Python environment.",
+                "fix_hint": "Run `python -m playwright install chromium` in this env and confirm backend uses the same interpreter.",
             }
         exe_out = (proc.stdout or "").strip()
         if not exe_out:
             return {
                 "ok": False,
                 "message": "Playwright runtime check failed: Chromium executable path was empty.",
-                "fix_hint": "Run `python -m playwright install chromium`.",
+                "fix_hint": "Reinstall browser binaries with `python -m playwright install chromium`.",
             }
     except Exception as exc:
         return {
             "ok": False,
             "message": f"Playwright runtime check failed: {_format_exc(exc)}",
-            "fix_hint": "Run `python -m playwright install chromium` and ensure browser binaries are accessible.",
+            "fix_hint": "Run `python -m playwright install chromium` and ensure Chromium binaries are accessible to this backend process.",
         }
 
     return {"ok": True, "message": "Playwright/browser dependency is available.", "fix_hint": ""}
@@ -423,7 +423,7 @@ def _check_linkedin_session() -> Dict[str, Any]:
         return {
             "ok": False,
             "message": f"Chrome profile path does not exist: {profile}",
-            "fix_hint": "Run `python setup-linkedin-profile.py` and sign in to LinkedIn once.",
+            "fix_hint": "Run `python setup-linkedin-profile.py`, sign in in that browser window, then rerun preflight.",
         }
 
     cookie_db = _find_cookie_db(profile)
@@ -431,7 +431,7 @@ def _check_linkedin_session() -> Dict[str, Any]:
         return {
             "ok": False,
             "message": f"Unable to verify LinkedIn session: no Chrome cookie DB found in {profile}",
-            "fix_hint": "Run `python setup-linkedin-profile.py` once and ensure Chrome profile data is created.",
+            "fix_hint": "Run `python setup-linkedin-profile.py` and complete one LinkedIn login to initialize profile cookies.",
         }
 
     has_cookie, err = _has_linkedin_session_cookie(cookie_db)
@@ -439,13 +439,13 @@ def _check_linkedin_session() -> Dict[str, Any]:
         return {
             "ok": False,
             "message": f"Unable to verify LinkedIn session from cookie DB: {err}",
-            "fix_hint": "Close Chrome windows using this profile and rerun `python setup-linkedin-profile.py`.",
+            "fix_hint": "Close all Chrome windows using this profile, then rerun `python setup-linkedin-profile.py`.",
         }
     if not has_cookie:
         return {
             "ok": False,
             "message": "LinkedIn session cookie (li_at) was not found in the configured profile.",
-            "fix_hint": "Run `python setup-linkedin-profile.py`, sign in on LinkedIn, then retry preflight.",
+            "fix_hint": "Run `python setup-linkedin-profile.py`, sign in to LinkedIn in that profile, then retry preflight.",
         }
 
     return {"ok": True, "message": "LinkedIn session check passed.", "fix_hint": ""}
@@ -477,7 +477,7 @@ def _onboarding_status_payload() -> Dict[str, Any]:
             "openai_api_key",
             openai_key_present,
             "OPENAI_API_KEY is set." if openai_key_present else "OPENAI_API_KEY is missing.",
-            "Set OPENAI_API_KEY in your environment before running AI-eval and cover letter features.",
+            "Set OPENAI_API_KEY in the shell that launches backend, restart backend, then run preflight again.",
         )
     )
 
@@ -490,7 +490,7 @@ def _onboarding_status_payload() -> Dict[str, Any]:
             f"LinkedIn profile directory found at {profile_path}."
             if profile_exists
             else f"LinkedIn profile directory is missing: {profile_path}",
-            "Run `python setup-linkedin-profile.py` to initialize a dedicated profile.",
+            "Run `python setup-linkedin-profile.py`, sign in once in that browser window, then rerun preflight.",
         )
     )
 
@@ -509,7 +509,7 @@ def _onboarding_status_payload() -> Dict[str, Any]:
             "artifacts_write_access",
             writable,
             "Artifacts directory is writable." if writable else f"Artifacts directory is not writable: {write_error}",
-            "Grant write permissions to the repository and artifacts directory.",
+            "Grant write permission to this repo/artifacts folder and close apps locking files, then rerun preflight.",
         )
     )
 
@@ -519,7 +519,7 @@ def _onboarding_status_payload() -> Dict[str, Any]:
             "config_validation",
             bool(validation.get("ok")),
             "Required config files validate." if validation.get("ok") else "One or more config files failed validation.",
-            "Use the onboarding validation details to fix config fields.",
+            "Open Onboarding Steps 3-6, fix highlighted fields, save each section, then rerun preflight.",
         )
     )
 
@@ -1391,7 +1391,7 @@ def api_onboarding_preflight():
             "openai_api_key",
             openai_key_present,
             "OPENAI_API_KEY is set." if openai_key_present else "OPENAI_API_KEY is missing.",
-            "Set OPENAI_API_KEY in your environment and restart backend.",
+            "Set OPENAI_API_KEY in the shell used to run backend, restart backend, then rerun preflight.",
         )
     )
 
@@ -1410,17 +1410,27 @@ def api_onboarding_preflight():
             "filesystem_writable",
             writable,
             "Required paths are writable." if writable else f"Cannot write required paths: {write_error}",
-            "Ensure this repo path is writable and not locked by another process.",
+            "Ensure this repo folder is writable, close apps locking files in this repo, then rerun preflight.",
         )
     )
 
     validation = _onboarding_validation_snapshot()
+    failing_configs = [
+        config_id
+        for config_id in ("resume_profile", "preferences", "shortlist_rules", "searches")
+        if not bool((validation.get(config_id) or {}).get("ok"))
+    ]
+    validation_fix = (
+        "Open Onboarding and fix invalid sections: " + ", ".join(failing_configs) + ". Save changes, then rerun preflight."
+        if failing_configs
+        else "Open Onboarding Steps 3-6, fix validation errors, save each section, then rerun preflight."
+    )
     checks.append(
         _build_check(
             "config_validation",
             bool(validation.get("ok")),
             "Required configs are valid." if validation.get("ok") else "One or more config files failed validation.",
-            "Fix validation errors for resume_profile, preferences, shortlist_rules, and searches.",
+            validation_fix,
         )
     )
 

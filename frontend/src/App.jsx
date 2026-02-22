@@ -243,6 +243,41 @@ function computeLivePosted(posted, scrapedAt) {
   return formatMinutesAgo(base + extra);
 }
 
+function preflightStateTone(value) {
+  const text = String(value || "").toLowerCase();
+  if (text.includes("pass")) return "ok";
+  if (text.includes("block") || text.includes("fail") || text.includes("error")) return "bad";
+  return "neutral";
+}
+
+function checkStatusTone(value) {
+  const text = String(value || "").toLowerCase();
+  if (text === "pass") return "pass";
+  if (text === "fail") return "fail";
+  return "other";
+}
+
+function failedCheckMessage(check, status) {
+  if (String(status || "").toLowerCase() !== "fail") return check.message;
+  const id = String(check?.id || "");
+  if (id === "openai_api_key") return "OPENAI_API_KEY is missing.";
+  if (id === "filesystem_writable") return "Required paths are not writable.";
+  if (id === "config_validation") return "Required configs are invalid.";
+  if (id === "playwright_runtime") return "Playwright/browser dependency is unavailable.";
+  if (id === "linkedin_session") return "LinkedIn session check failed.";
+  return check.message;
+}
+
+function defaultFixHintForCheck(checkId) {
+  const id = String(checkId || "");
+  if (id === "openai_api_key") return "Set OPENAI_API_KEY in the shell used to run backend, restart backend, then rerun preflight.";
+  if (id === "filesystem_writable") return "Ensure this repo folder is writable, close apps locking files in this repo, then rerun preflight.";
+  if (id === "config_validation") return "Open Onboarding Steps 3-6, fix highlighted fields, save each section, then rerun preflight.";
+  if (id === "playwright_runtime") return "Run `python -m playwright install chromium` in this env and confirm backend uses the same interpreter.";
+  if (id === "linkedin_session") return "Run `python setup-linkedin-profile.py`, sign in to LinkedIn in that profile, then retry preflight.";
+  return "Resolve this check before starting the pipeline.";
+}
+
 function badgeClass(group, value) {
   const v = (value || "").toLowerCase();
   if (!v) return "badge neutral";
@@ -1413,8 +1448,13 @@ export default function App() {
                 <ul>
                   {onboardingStatus.checks.map((check) => (
                     <li key={check.id}>
-                      [{check.status}] {check.id}: {check.message}
-                      {check.status !== "pass" && check.fix_hint ? ` | fix: ${check.fix_hint}` : ""}
+                      <span className={`check-status ${checkStatusTone(check.status)}`}>[{check.status}]</span>{" "}
+                      {check.id}: {failedCheckMessage(check, check.status)}
+                      {check.status !== "pass" && check.fix_hint ? (
+                        <div className="check-fix-line">
+                          <strong className="fix-label">FIX:</strong> {check.fix_hint}
+                        </div>
+                      ) : ""}
                     </li>
                   ))}
                 </ul>
@@ -1646,7 +1686,7 @@ export default function App() {
                 />
               </div>
               <div className="field">
-                <label>LinkedIn URL (optional override)</label>
+                <label>LinkedIn URL (optional)</label>
                 <input
                   value={newSearchForm.url}
                   onChange={(e) => setNewSearchForm((prev) => ({ ...prev, url: e.target.value }))}
@@ -1691,8 +1731,13 @@ export default function App() {
                   <ul>
                     {(onboardingPreflight.checks || []).map((check) => (
                       <li key={`pf-${check.id}`}>
-                        [{check.status}] {check.id}: {check.message}
-                        {check.status !== "pass" && check.fix_hint ? ` | fix: ${check.fix_hint}` : ""}
+                        <span className={`check-status ${checkStatusTone(check.status)}`}>[{check.status}]</span>{" "}
+                        {check.id}: {failedCheckMessage(check, check.status)}
+                        {check.status !== "pass" && check.fix_hint ? (
+                          <div className="check-fix-line">
+                            <strong className="fix-label">FIX:</strong> {check.fix_hint}
+                          </div>
+                        ) : ""}
                       </li>
                     ))}
                   </ul>
@@ -2441,14 +2486,38 @@ export default function App() {
                   </button>
                 </div>
                 {coverEstimate && (
-                  <div className="ai-estimate">
-                    Est. {formatTokens(coverEstimate.input_tokens_est)} in / {formatTokens(coverEstimate.output_tokens_est)} out
-                    {coverEstimate.model ? ` · ${coverEstimate.model}` : ""}
-                    {" · "}
-                    {formatCost(coverEstimate.cost_est)}
-                    {coverEstimate.cost_est_range
-                      ? ` (${formatCost(coverEstimate.cost_est_range.low)}–${formatCost(coverEstimate.cost_est_range.high)})`
-                      : ""}
+                  <div className="estimate-panel">
+                    <div className="estimate-row">
+                      <div className="estimate-item estimate-item-cost">
+                        <span className="estimate-label">Cost</span>
+                        <span className="estimate-value">{formatCost(coverEstimate.cost_est)}</span>
+                      </div>
+                      {coverEstimate.cost_est_range && (
+                        <div className="estimate-item">
+                          <span className="estimate-label">Range</span>
+                          <span className="estimate-value">
+                            {formatCost(coverEstimate.cost_est_range.low)}-{formatCost(coverEstimate.cost_est_range.high)}
+                          </span>
+                        </div>
+                      )}
+                      {coverEstimate.model && (
+                        <div className="estimate-item">
+                          <span className="estimate-label">Model</span>
+                          <span className="estimate-value">{coverEstimate.model}</span>
+                        </div>
+                      )}
+                      <div className="estimate-item">
+                        <span className="estimate-label">Input <span className="estimate-unit">(tokens)</span></span>
+                        <span className="estimate-value">{formatTokens(coverEstimate.input_tokens_est)}</span>
+                      </div>
+                      <div className="estimate-item">
+                        <span className="estimate-label">Output <span className="estimate-unit">(tokens)</span></span>
+                        <span className="estimate-value">{formatTokens(coverEstimate.output_tokens_est)}</span>
+                      </div>
+                    </div>
+                    <div className="estimate-note">
+                      Estimate is based on current prompt and selected model. Actual usage varies by job details.
+                    </div>
                   </div>
                 )}
                 <div className="template-bar">
@@ -2579,7 +2648,7 @@ export default function App() {
                     LinkedIn Jobs
                   </a>
                   , apply your filters, confirm results look right, copy the full URL
-                  from the browser address bar, then paste it into "LinkedIn URL (optional override)" below.
+                  from the browser address bar, then paste it into "LinkedIn URL (optional)" below.
                 </div>
                 <div className="field">
                   <label>Label</label>
@@ -2609,7 +2678,7 @@ export default function App() {
                 </div>
                 <div className="field">
                   <label>
-                    LinkedIn URL (optional override, <strong className="recommend-emphasis">recommended</strong>)
+                    LinkedIn URL (optional, <strong className="recommend-emphasis">recommended</strong>)
                   </label>
                   <input
                     value={pipelineSearchForm.url}
@@ -2666,43 +2735,85 @@ export default function App() {
                 ))}
               </select>
             </div>
-            <div className="panel">
-              <h3>Preflight Gate</h3>
-              <div className="actions">
-                <button onClick={fetchPipelinePreflight}>Run preflight now</button>
-                {pipelineGateState && <span className="status">{pipelineGateState}</span>}
-              </div>
-              {pipelinePreflight ? (
-                <div>
-                  <div>Ready: {String(!!pipelinePreflight.ready)}</div>
-                  <ul>
-                    {(pipelinePreflight.checks || []).map((check) => (
-                      <li key={`pipeline-preflight-${check.id}`}>
-                        [{check.status}] {check.id}: {check.message}
-                        {check.status !== "pass" && check.fix_hint ? ` | fix: ${check.fix_hint}` : ""}
-                      </li>
-                    ))}
-                  </ul>
+            <div className="pipeline-gate-estimate">
+              {pipelineEstimate && (
+                <div className="estimate-panel">
+                  <div className="estimate-row">
+                    <div className="estimate-item estimate-item-cost">
+                      <span className="estimate-label">Cost</span>
+                      <span className="estimate-value">{formatCost(pipelineEstimate.cost_est)}</span>
+                    </div>
+                    {pipelineEstimate.cost_est_range && (
+                      <div className="estimate-item">
+                        <span className="estimate-label">Range</span>
+                        <span className="estimate-value">
+                          {formatCost(pipelineEstimate.cost_est_range.low)}-{formatCost(pipelineEstimate.cost_est_range.high)}
+                        </span>
+                      </div>
+                    )}
+                    {pipelineEstimate.jobs_est != null && (
+                      <div className="estimate-item">
+                        <span className="estimate-label">Jobs</span>
+                        <span className="estimate-value">{pipelineEstimate.jobs_est}</span>
+                      </div>
+                    )}
+                    {pipelineEstimate.model && (
+                      <div className="estimate-item">
+                        <span className="estimate-label">Model</span>
+                        <span className="estimate-value">{pipelineEstimate.model}</span>
+                      </div>
+                    )}
+                    <div className="estimate-item">
+                      <span className="estimate-label">Input <span className="estimate-unit">(tokens)</span></span>
+                      <span className="estimate-value">{formatTokens(pipelineEstimate.input_tokens_est)}</span>
+                    </div>
+                    <div className="estimate-item">
+                      <span className="estimate-label">Output <span className="estimate-unit">(tokens)</span></span>
+                      <span className="estimate-value">{formatTokens(pipelineEstimate.output_tokens_est)}</span>
+                    </div>
+                  </div>
+                  <div className="estimate-note">
+                    Estimate is based on selected search, current prompt, and selected model. Actual usage varies by job details.
+                  </div>
                 </div>
-              ) : (
-                <div className="empty">Run preflight to verify readiness before starting.</div>
               )}
+              <div className="panel preflight-panel">
+                <h3>Preflight Gate</h3>
+                <div className="actions">
+                  <button onClick={fetchPipelinePreflight}>Run preflight now</button>
+                  {pipelineGateState && (
+                    <span className={`status preflight-state ${preflightStateTone(pipelineGateState)}`}>
+                      {pipelineGateState}
+                    </span>
+                  )}
+                </div>
+                {pipelinePreflight ? (
+                  <div>
+                    <div>Ready: {String(!!pipelinePreflight.ready)}</div>
+                    <ul>
+                      {(pipelinePreflight.checks || []).map((check) => {
+                        const status = "fail";
+                        const fixHint = check.fix_hint || defaultFixHintForCheck(check.id);
+                        return (
+                          <li key={`pipeline-preflight-${check.id}`}>
+                            <span className={`check-status ${checkStatusTone(status)}`}>[{status}]</span>{" "}
+                            {check.id}: {failedCheckMessage(check, status)}
+                            <div className="check-fix-line">
+                              <strong className="fix-label">FIX:</strong> {fixHint}
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                ) : (
+                  <div className="empty">Run preflight to verify readiness before starting.</div>
+                )}
+              </div>
             </div>
             <button className="primary" onClick={runPipeline} disabled={running}>
               Start
             </button>
-            {pipelineEstimate && (
-              <div className="ai-estimate">
-                Pipeline AI eval est. {formatTokens(pipelineEstimate.input_tokens_est)} in / {formatTokens(pipelineEstimate.output_tokens_est)} out
-                {pipelineEstimate.model ? ` · ${pipelineEstimate.model}` : ""}
-                {" · "}
-                {formatCost(pipelineEstimate.cost_est)}
-                {pipelineEstimate.cost_est_range
-                  ? ` (${formatCost(pipelineEstimate.cost_est_range.low)}–${formatCost(pipelineEstimate.cost_est_range.high)})`
-                  : ""}
-                {pipelineEstimate.jobs_est != null ? ` · jobs ${pipelineEstimate.jobs_est}` : ""}
-              </div>
-            )}
             <div className="pipeline-buttons">
               {["scout", "shortlist", "scrape", "eval"].map((step) => (
                 <button key={step} onClick={() => runStep(step)} disabled={running}>

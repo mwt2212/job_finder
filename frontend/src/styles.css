@@ -656,19 +656,108 @@ section {
   border-color: #f2c2c8;
 }
 
-.ai-estimate {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 600;
+.preflight-state {
+  font-weight: 700;
+}
+
+.preflight-state.ok {
   color: #1f6b4c;
-  background: #e9f5ef;
-  border: 1px solid #cfe7dd;
-  padding: 4px 10px;
-  border-radius: 999px;
-  margin-bottom: 8px;
+}
+
+.preflight-state.bad {
+  color: #8a1f2b;
+}
+
+.check-status {
+  font-weight: 700;
+}
+
+.check-status.pass {
+  color: #1f6b4c;
+}
+
+.check-status.fail {
+  color: #8a1f2b;
+}
+
+.fix-label {
+  font-weight: 700;
+}
+
+.check-fix-line {
+  margin-left: 22px;
+  margin-top: 2px;
+}
+
+.estimate-panel {
+  display: grid;
+  gap: 10px;
+  background: #faf8f4;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 8px 10px 7px;
+  margin-bottom: 10px;
+  width: fit-content;
+  max-width: 360px;
+}
+
+.estimate-row {
+  display: grid;
+  gap: 4px;
+}
+
+.estimate-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  min-width: 0;
+  padding: 3px 0;
+  border: 0;
+  background: transparent;
+  border-bottom: 1px solid #ece4d9;
+}
+
+.estimate-item-cost {
+  border: 1px solid #d9b89a;
+  border-bottom: 1px solid #d9b89a;
+  background: #fff2e4;
+  border-radius: 10px;
+  padding: 7px 11px;
+}
+
+.estimate-label {
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+}
+
+.estimate-unit {
+  font-size: 9px;
+  text-transform: none;
+  letter-spacing: 0.01em;
+  font-weight: 600;
+  color: #7b746b;
+}
+
+.estimate-value {
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--ink);
+  line-height: 1.15;
+}
+
+.estimate-item-cost .estimate-value {
+  font-size: 17px;
+  font-weight: 750;
+}
+
+.estimate-note {
+  font-size: 11px;
+  color: var(--muted);
+  padding-top: 6px;
+  border-top: 1px solid #e8e0d6;
 }
 
 .modal-backdrop {
@@ -718,6 +807,46 @@ section {
 
 .pipeline .panel {
   margin-top: 0;
+}
+
+.pipeline-gate-estimate {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  margin-bottom: 10px;
+}
+
+.pipeline-gate-estimate .panel {
+  margin: 0;
+  flex: 1;
+}
+
+.preflight-panel {
+  padding: 9px 11px;
+}
+
+.preflight-panel h3 {
+  margin: 0 0 6px;
+}
+
+.preflight-panel .actions {
+  margin-top: 6px;
+  margin-bottom: 6px;
+  gap: 8px;
+}
+
+.preflight-panel ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.preflight-panel li {
+  margin: 2px 0;
+}
+
+.preflight-panel .empty {
+  text-align: left;
+  padding: 8px 0 2px;
 }
 
 .pipeline-buttons {
