@@ -210,6 +210,10 @@ Local/private variants (preferred for personal data):
 Backup/restore and recovery runbook:
 - `docs/local-data-and-recovery.md`
 
+Tracked vs generated files:
+- Generated build output (`frontend/dist/assets/index-*.js`) and migration backups (`*.bak.*`) are treated as local artifacts, not source.
+- Keep source/config files tracked; keep generated runtime artifacts out of commits.
+
 ## AI Cost Tracking
 
 - Pricing source: `ai_pricing.json`
