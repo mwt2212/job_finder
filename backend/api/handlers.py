@@ -675,6 +675,231 @@ def _build_profile_draft_from_text(text: str) -> Dict[str, Any]:
     }
 
 
+def _extract_json_object(text: str) -> Optional[Dict[str, Any]]:
+    raw = (text or "").strip()
+    if not raw:
+        return None
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        if raw.lower().startswith("json"):
+            raw = raw[4:].strip()
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        pass
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start >= 0 and end > start:
+        chunk = raw[start : end + 1]
+        try:
+            parsed = json.loads(chunk)
+            return parsed if isinstance(parsed, dict) else None
+        except Exception:
+            return None
+    return None
+
+
+def _coerce_draft_payload(payload: Dict[str, Any], fallback: Dict[str, Any]) -> Dict[str, Any]:
+    out = {
+        "resume_profile": payload.get("resume_profile") if isinstance(payload.get("resume_profile"), dict) else fallback.get("resume_profile", {}),
+        "preferences": payload.get("preferences") if isinstance(payload.get("preferences"), dict) else fallback.get("preferences", {}),
+        "shortlist_rules": payload.get("shortlist_rules") if isinstance(payload.get("shortlist_rules"), dict) else fallback.get("shortlist_rules", {}),
+        "searches": payload.get("searches") if isinstance(payload.get("searches"), dict) else fallback.get("searches", {}),
+    }
+    confidence = payload.get("confidence")
+    out["confidence"] = float(confidence) if isinstance(confidence, (int, float)) else float(fallback.get("confidence", 0.5))
+    prompts = payload.get("missing_fields_prompts")
+    if isinstance(prompts, list):
+        out["missing_fields_prompts"] = [str(p) for p in prompts if str(p).strip()]
+    else:
+        out["missing_fields_prompts"] = list(fallback.get("missing_fields_prompts", []))
+    return out
+
+
+def _normalize_prompt(prompt: str) -> str:
+    text = re.sub(r"\s+", " ", str(prompt or "").strip().lower())
+    return re.sub(r"[^\w\s]", "", text)
+
+
+def _prompt_category(prompt: str) -> str:
+    p = _normalize_prompt(prompt)
+    if any(k in p for k in ["role", "position", "job title"]):
+        return "roles"
+    if any(k in p for k in ["skill", "tool", "stack"]):
+        return "skills"
+    if any(k in p for k in ["salary", "base pay", "compensation"]):
+        return "salary"
+    if any(k in p for k in ["remote", "hybrid", "onsite", "workplace"]):
+        return "workplace"
+    if any(k in p for k in ["city", "state", "location", "where"]):
+        return "location"
+    return "other"
+
+
+def _has_context_for_category(category: str, context_text: str, draft: Dict[str, Any], payload: OnboardingProfileDraftIn) -> bool:
+    text = (context_text or "").lower()
+    resume_profile = draft.get("resume_profile") if isinstance(draft.get("resume_profile"), dict) else {}
+    preferences = draft.get("preferences") if isinstance(draft.get("preferences"), dict) else {}
+    if category == "roles":
+        return bool((resume_profile.get("target_roles") or payload.target_roles_seed or []))
+    if category == "skills":
+        return bool((resume_profile.get("skills") or payload.skills_seed or []))
+    if category == "salary":
+        hard = preferences.get("hard_constraints") if isinstance(preferences.get("hard_constraints"), dict) else {}
+        if hard.get("min_base_salary_usd") not in (None, ""):
+            return True
+        return bool(re.search(r"\$\s*\d|\b\d{2,3}k\b|\bminimum salary\b|\bsalary floor\b", text))
+    if category == "workplace":
+        return any(word in text for word in ["remote", "hybrid", "onsite", "on-site"])
+    if category == "location":
+        return bool(re.search(r"\b[a-z]+,\s*[a-z]{2}\b", text))
+    return False
+
+
+def _finalize_missing_prompts(raw_prompts: List[str], payload: OnboardingProfileDraftIn, draft: Dict[str, Any]) -> List[str]:
+    combined_context = "\n".join(
+        [
+            payload.text or "",
+            payload.resume_text or "",
+            " ".join(payload.target_roles_seed or []),
+            " ".join(payload.skills_seed or []),
+            payload.education_summary_seed or "",
+        ]
+    )
+    prior_categories = {_prompt_category(p) for p in (payload.prior_missing_fields_prompts or []) if str(p).strip()}
+    seen = set()
+    out: List[str] = []
+    for prompt in raw_prompts:
+        clean = str(prompt or "").strip()
+        if not clean:
+            continue
+        norm = _normalize_prompt(clean)
+        if norm in seen:
+            continue
+        seen.add(norm)
+        category = _prompt_category(clean)
+        if _has_context_for_category(category, combined_context, draft, payload):
+            continue
+        if category in prior_categories and category != "other":
+            continue
+        out.append(clean)
+    return out
+
+
+def _build_unified_profile_prompt(payload: OnboardingProfileDraftIn) -> str:
+    text = (payload.text or "").strip()
+    resume_text = (payload.resume_text or "").strip()
+    resume_seed = payload.resume_profile_seed or {}
+    prefs_seed = payload.preferences_seed or {}
+    rules_seed = payload.shortlist_rules_seed or {}
+    target_roles_seed = payload.target_roles_seed or []
+    skills_seed = payload.skills_seed or []
+    education_summary_seed = (payload.education_summary_seed or "").strip()
+    prior_missing = payload.prior_missing_fields_prompts or []
+    return (
+        "You are generating onboarding config JSON for a local job-finder app.\n"
+        "Use ALL inputs together: parsed resume content, candidate plain-English intake, and UI seed fields.\n"
+        "Prioritize factual details from resume_text and seed fields over vague statements.\n"
+        "Output strict JSON only. No markdown. No commentary.\n\n"
+        "Return exactly these top-level keys:\n"
+        "{\n"
+        '  "resume_profile": {...},\n'
+        '  "preferences": {...},\n'
+        '  "shortlist_rules": {...},\n'
+        '  "searches": {...},\n'
+        '  "confidence": number,\n'
+        '  "missing_fields_prompts": [string]\n'
+        "}\n\n"
+        "Schema expectations:\n"
+        '- resume_profile: include at least "skills" (array) and "target_roles" (array). Include "education" object when possible.\n'
+        '- preferences: include qualification.min_match_score and hard_constraints.no_cold_calling/min_base_salary_usd when inferable.\n'
+        '- shortlist_rules: include workplace_score(remote/hybrid/onsite/unknown) and penalties.\n'
+        '- searches: can be empty {} if uncertain; do not hallucinate specific URLs.\n'
+        '- confidence: 0.0 to 1.0.\n'
+        "- missing_fields_prompts: concise follow-up questions to improve weak/missing areas.\n\n"
+        "Clarifying-question policy:\n"
+        "- Ask follow-up questions only when information is truly missing across all provided inputs.\n"
+        "- Do not repeat categories already answered in plain-English intake, resume text, or seed fields.\n"
+        "- Avoid repeating categories from previously asked prompts unless still truly unresolved.\n\n"
+        "Candidate plain-English intake:\n"
+        f"{text[:12000]}\n\n"
+        "Resume extracted text:\n"
+        f"{resume_text[:14000]}\n\n"
+        "UI seed fields from current form:\n"
+        f"target_roles_seed={json.dumps(target_roles_seed, ensure_ascii=False)}\n"
+        f"skills_seed={json.dumps(skills_seed, ensure_ascii=False)}\n"
+        f"education_summary_seed={json.dumps(education_summary_seed, ensure_ascii=False)}\n\n"
+        "Parsed seed config from earlier pipeline:\n"
+        f"resume_profile_seed={json.dumps(resume_seed, ensure_ascii=False)[:6000]}\n"
+        f"preferences_seed={json.dumps(prefs_seed, ensure_ascii=False)[:4000]}\n"
+        f"shortlist_rules_seed={json.dumps(rules_seed, ensure_ascii=False)[:4000]}\n"
+        f"prior_missing_fields_prompts={json.dumps(prior_missing, ensure_ascii=False)}\n"
+    )
+
+
+def _build_profile_draft_unified(payload: OnboardingProfileDraftIn) -> Dict[str, Any]:
+    text = (payload.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+
+    heuristic_input = "\n\n".join([s for s in [payload.resume_text or "", text] if s.strip()])
+    heuristic = _build_profile_draft_from_text(heuristic_input or text)
+
+    if payload.resume_profile_seed and isinstance(payload.resume_profile_seed, dict):
+        heuristic["resume_profile"] = {**heuristic.get("resume_profile", {}), **payload.resume_profile_seed}
+    if payload.preferences_seed and isinstance(payload.preferences_seed, dict):
+        heuristic["preferences"] = {**heuristic.get("preferences", {}), **payload.preferences_seed}
+    if payload.shortlist_rules_seed and isinstance(payload.shortlist_rules_seed, dict):
+        heuristic["shortlist_rules"] = {**heuristic.get("shortlist_rules", {}), **payload.shortlist_rules_seed}
+    if payload.target_roles_seed:
+        heuristic.setdefault("resume_profile", {})["target_roles"] = payload.target_roles_seed
+    if payload.skills_seed:
+        heuristic.setdefault("resume_profile", {})["skills"] = payload.skills_seed
+    if payload.education_summary_seed:
+        heuristic.setdefault("resume_profile", {}).setdefault("education", {})["degree"] = payload.education_summary_seed
+    heuristic["missing_fields_prompts"] = _finalize_missing_prompts(
+        list(heuristic.get("missing_fields_prompts", [])),
+        payload,
+        heuristic,
+    )
+
+    if not (OpenAI and (os.getenv("OPENAI_API_KEY") or "").strip()):
+        heuristic["ai_used"] = False
+        return heuristic
+    try:
+        client = OpenAI()
+        prompt = _build_unified_profile_prompt(payload)
+        if hasattr(client, "responses"):
+            resp = client.responses.create(model="gpt-4.1-mini", input=prompt)
+            out_text = getattr(resp, "output_text", "") or ""
+        else:
+            resp = client.chat.completions.create(
+                model="gpt-4.1-mini",
+                messages=[
+                    {"role": "system", "content": "Return valid JSON only."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0,
+            )
+            out_text = resp.choices[0].message.content or ""
+        parsed = _extract_json_object(out_text or "")
+        if not parsed:
+            heuristic["ai_used"] = False
+            return heuristic
+        combined = _coerce_draft_payload(parsed, heuristic)
+        combined["missing_fields_prompts"] = _finalize_missing_prompts(
+            list(combined.get("missing_fields_prompts", [])),
+            payload,
+            combined,
+        )
+        combined["ai_used"] = True
+        return combined
+    except Exception:
+        heuristic["ai_used"] = False
+        return heuristic
+
+
 def _evaluation_preferences_payload(prefs: Dict[str, Any]) -> Dict[str, Any]:
     payload = json.loads(json.dumps(prefs or {}, ensure_ascii=False))
     search_filters = payload.get("search_filters")
@@ -1241,10 +1466,7 @@ def api_onboarding_put_searches(payload: Any):
 
 
 def api_onboarding_profile_draft(payload: OnboardingProfileDraftIn):
-    text = (payload.text or "").strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="text is required")
-    return _build_profile_draft_from_text(text)
+    return _build_profile_draft_unified(payload)
 
 
 async def api_onboarding_resume_parse(file: UploadFile = File(...)):
@@ -1271,7 +1493,7 @@ async def api_onboarding_resume_parse(file: UploadFile = File(...)):
     else:
         draft["ai_used"] = False
 
-    return {"filename": filename, "extracted_chars": len(text), "draft": draft}
+    return {"filename": filename, "extracted_chars": len(text), "extracted_text": text[:20000], "draft": draft}
 
 
 def api_onboarding_get_searches():

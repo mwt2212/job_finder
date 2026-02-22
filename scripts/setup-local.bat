@@ -32,6 +32,11 @@ if not exist "%VENV_PY%" (
 echo [setup] Installing backend dependencies...
 "%VENV_PY%" -m pip install --upgrade pip || exit /b 1
 "%VENV_PY%" -m pip install -r "%BACKEND%\requirements.txt" || exit /b 1
+"%VENV_PY%" -c "import pypdf" >nul 2>nul
+if errorlevel 1 (
+  echo [setup] pypdf missing after requirements install, installing pinned fallback...
+  "%VENV_PY%" -m pip install pypdf==5.4.0 || exit /b 1
+)
 
 echo [setup] Installing Playwright Chromium...
 "%VENV_PY%" -m playwright install chromium || exit /b 1

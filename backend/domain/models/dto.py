@@ -82,3 +82,11 @@ class OnboardingSearchUpdateIn(BaseModel):
 
 class OnboardingProfileDraftIn(BaseModel):
     text: str
+    resume_text: Optional[str] = ""
+    resume_profile_seed: Optional[Dict[str, Any]] = None
+    preferences_seed: Optional[Dict[str, Any]] = None
+    shortlist_rules_seed: Optional[Dict[str, Any]] = None
+    target_roles_seed: Optional[List[str]] = None
+    skills_seed: Optional[List[str]] = None
+    education_summary_seed: Optional[str] = ""
+    prior_missing_fields_prompts: Optional[List[str]] = None

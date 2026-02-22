@@ -272,10 +272,156 @@ function defaultFixHintForCheck(checkId) {
   const id = String(checkId || "");
   if (id === "openai_api_key") return "Set OPENAI_API_KEY in the shell used to run backend, restart backend, then rerun preflight.";
   if (id === "filesystem_writable") return "Ensure this repo folder is writable, close apps locking files in this repo, then rerun preflight.";
-  if (id === "config_validation") return "Open Onboarding Steps 3-6, fix highlighted fields, save each section, then rerun preflight.";
+  if (id === "config_validation") return "Open Onboarding Step 3, fix highlighted fields, save all config blocks, then rerun preflight.";
   if (id === "playwright_runtime") return "Run `python -m playwright install chromium` in this env and confirm backend uses the same interpreter.";
   if (id === "linkedin_session") return "Run `python setup-linkedin-profile.py`, sign in to LinkedIn in that profile, then retry preflight.";
   return "Resolve this check before starting the pipeline.";
+}
+
+function sanitizeCommaListInput(value) {
+  return String(value || "").replace(/[^a-zA-Z,\s.\-&/']/g, "");
+}
+
+function parseCommaList(value) {
+  return sanitizeCommaListInput(value).split(",").map((t) => t.trim()).filter(Boolean);
+}
+
+function formatCommaListDisplay(value) {
+  return parseCommaList(value).join(", ");
+}
+
+function stripSearchesForDisplay(obj) {
+  if (!obj || typeof obj !== "object") return obj;
+  const { searches, ...rest } = obj;
+  return rest;
+}
+
+function sortObjectDeep(value) {
+  if (Array.isArray(value)) {
+    return value.map(sortObjectDeep);
+  }
+  if (value && typeof value === "object") {
+    const out = {};
+    Object.keys(value)
+      .sort((a, b) => a.localeCompare(b))
+      .forEach((key) => {
+        out[key] = sortObjectDeep(value[key]);
+      });
+    return out;
+  }
+  return value;
+}
+
+function normalizeConfigForDisplay(obj) {
+  return sortObjectDeep(stripSearchesForDisplay(obj || {}));
+}
+
+function projectComparableConfig(obj) {
+  const source = obj || {};
+  const resume = source.resume_profile || {};
+  const prefs = source.preferences || {};
+  const hard = prefs.hard_constraints || {};
+  const qual = prefs.qualification || {};
+  const rules = source.shortlist_rules || {};
+  const penalties = rules.penalties || {};
+  return {
+    resume_profile: {
+      target_roles: Array.isArray(resume.target_roles) ? resume.target_roles : [],
+      skills: Array.isArray(resume.skills) ? resume.skills : [],
+      education: resume.education && typeof resume.education === "object" ? resume.education : {}
+    },
+    preferences: {
+      hard_constraints: {
+        min_base_salary_usd: hard.min_base_salary_usd ?? null,
+        no_cold_calling: hard.no_cold_calling ?? null
+      },
+      qualification: {
+        min_match_score: qual.min_match_score ?? null
+      }
+    },
+    shortlist_rules: {
+      workplace_score:
+        rules.workplace_score && typeof rules.workplace_score === "object" ? rules.workplace_score : {},
+      penalties: {
+        sales_adjacent:
+          penalties.sales_adjacent ??
+          rules.sales_adjacent_penalty ??
+          null,
+        healthcare:
+          penalties.healthcare ??
+          rules.healthcare_penalty ??
+          null,
+        wrong_field:
+          penalties.wrong_field ??
+          rules.wrong_field_penalty ??
+          null
+      }
+    }
+  };
+}
+
+function selectDraftUpdatableFields(draft) {
+  const src = draft || {};
+  const resume = src.resume_profile || {};
+  const prefs = src.preferences || {};
+  const hard = prefs.hard_constraints || {};
+  const qual = prefs.qualification || {};
+  const rules = src.shortlist_rules || {};
+  const penalties = rules.penalties || {};
+  return {
+    resume_profile: {
+      ...(Array.isArray(resume.target_roles) ? { target_roles: resume.target_roles } : {}),
+      ...(Array.isArray(resume.skills) ? { skills: resume.skills } : {}),
+      ...(resume.education && typeof resume.education === "object" ? { education: resume.education } : {})
+    },
+    preferences: {
+      hard_constraints: {
+        ...(hard.min_base_salary_usd !== undefined ? { min_base_salary_usd: hard.min_base_salary_usd } : {}),
+        ...(hard.no_cold_calling !== undefined ? { no_cold_calling: hard.no_cold_calling } : {})
+      },
+      qualification: {
+        ...(qual.min_match_score !== undefined ? { min_match_score: qual.min_match_score } : {})
+      }
+    },
+    shortlist_rules: {
+      ...(rules.workplace_score && typeof rules.workplace_score === "object"
+        ? { workplace_score: rules.workplace_score }
+        : {}),
+      ...(penalties.sales_adjacent !== undefined || rules.sales_adjacent_penalty !== undefined
+        ? { sales_adjacent_penalty: penalties.sales_adjacent ?? rules.sales_adjacent_penalty }
+        : {}),
+      ...(penalties.healthcare !== undefined || rules.healthcare_penalty !== undefined
+        ? { healthcare_penalty: penalties.healthcare ?? rules.healthcare_penalty }
+        : {}),
+      ...(penalties.wrong_field !== undefined || rules.wrong_field_penalty !== undefined
+        ? { wrong_field_penalty: penalties.wrong_field ?? rules.wrong_field_penalty }
+        : {})
+    }
+  };
+}
+
+function hasMeaningfulValue(value) {
+  if (value == null) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "object") return Object.keys(value).length > 0;
+  return true;
+}
+
+function mergeDraftPreferExisting(existing, draft) {
+  if (Array.isArray(existing) || Array.isArray(draft)) {
+    const existingArr = Array.isArray(existing) ? existing : [];
+    const draftArr = Array.isArray(draft) ? draft : [];
+    return existingArr.length ? existingArr : draftArr;
+  }
+  if (typeof existing === "object" && existing && typeof draft === "object" && draft) {
+    const merged = { ...existing };
+    Object.keys(draft).forEach((key) => {
+      merged[key] = mergeDraftPreferExisting(existing?.[key], draft[key]);
+    });
+    return merged;
+  }
+  return hasMeaningfulValue(existing) ? existing : draft;
 }
 
 function badgeClass(group, value) {
@@ -384,6 +530,9 @@ export default function App() {
   const [pipelineSearchStateError, setPipelineSearchStateError] = useState(false);
   const [pipelineDeletedSearch, setPipelineDeletedSearch] = useState(null);
   const [pipelineSearchEditorOpen, setPipelineSearchEditorOpen] = useState(false);
+  const [targetRolesInput, setTargetRolesInput] = useState("");
+  const [skillsInput, setSkillsInput] = useState("");
+  const [educationInput, setEducationInput] = useState("");
   const [pipelineSearchForm, setPipelineSearchForm] = useState({
     label: "",
     location_label: "",
@@ -677,12 +826,16 @@ export default function App() {
     fetch(`${API}/onboarding/config`)
       .then((r) => r.json())
       .then((data) => {
-        setOnboardingConfig({
+        const nextConfig = {
           resume_profile: data.resume_profile || {},
           preferences: data.preferences || {},
           shortlist_rules: data.shortlist_rules || {},
           searches: data.searches || {}
-        });
+        };
+        setOnboardingConfig(nextConfig);
+        setTargetRolesInput((nextConfig.resume_profile?.target_roles || []).join(", "));
+        setSkillsInput((nextConfig.resume_profile?.skills || []).join(", "));
+        setEducationInput(nextConfig.resume_profile?.education?.degree || "");
       })
       .catch(() => {});
   };
@@ -736,6 +889,88 @@ export default function App() {
       .catch((err) => setOnboardingState(`Draft failed: ${err.message}`));
   };
 
+  const generateUnifiedDraftPreview = async () => {
+    if (!resumeFile) {
+      setOnboardingState("Attach a resume file first (required).");
+      return;
+    }
+    if (!profileDraftInput.trim()) {
+      setOnboardingState("Add a detailed plain-English intake first (required).");
+      return;
+    }
+    setOnboardingState("Generating draft preview from resume + written context...");
+    try {
+      const form = new FormData();
+      form.append("file", resumeFile);
+      const resumeResponse = await fetch(`${API}/onboarding/resume-parse`, { method: "POST", body: form });
+      const resumeData = await resumeResponse.json().catch(() => ({}));
+      if (!resumeResponse.ok) {
+        throw new Error(resumeData.detail || "Resume parse failed");
+      }
+      setResumeParseMeta({
+        filename: resumeData.filename,
+        extracted_chars: resumeData.extracted_chars,
+        ai_used: !!resumeData?.draft?.ai_used
+      });
+
+      const draftResponse = await fetch(`${API}/onboarding/profile-draft`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: profileDraftInput,
+          resume_text: String(resumeData.extracted_text || ""),
+          resume_profile_seed: onboardingConfig.resume_profile || {},
+          preferences_seed: onboardingConfig.preferences || {},
+          shortlist_rules_seed: onboardingConfig.shortlist_rules || {},
+          target_roles_seed: parseCommaList(targetRolesInput),
+          skills_seed: parseCommaList(skillsInput),
+          education_summary_seed: educationInput || "",
+          prior_missing_fields_prompts: profileDraftResult?.missing_fields_prompts || []
+        })
+      });
+      const draftData = await draftResponse.json().catch(() => ({}));
+      if (!draftResponse.ok) {
+        throw new Error(draftData.detail || "Profile draft endpoint unavailable");
+      }
+
+      setProfileDraftResult(draftData || {});
+      setOnboardingState("Draft preview generated. Review it, then apply to form.");
+    } catch (err) {
+      setOnboardingState(`Draft preview failed: ${err.message}`);
+    }
+  };
+
+  const applyDraftPreviewToForm = () => {
+    if (!profileDraftResult) return;
+    const draftAllowed = selectDraftUpdatableFields(profileDraftResult);
+    setOnboardingConfig((prev) => {
+      const seededResume = {
+        ...(prev.resume_profile || {}),
+        ...(parseCommaList(targetRolesInput).length ? { target_roles: parseCommaList(targetRolesInput) } : {}),
+        ...(parseCommaList(skillsInput).length ? { skills: parseCommaList(skillsInput) } : {}),
+        ...(String(educationInput || "").trim()
+          ? {
+              education: {
+                ...(prev.resume_profile?.education || {}),
+                degree: educationInput
+              }
+            }
+          : {})
+      };
+      const nextResume = mergeDraftPreferExisting(seededResume, draftAllowed.resume_profile || {});
+      const nextConfig = {
+        ...prev,
+        resume_profile: nextResume,
+        preferences: mergeDraftPreferExisting(prev.preferences || {}, draftAllowed.preferences || {}),
+        shortlist_rules: mergeDraftPreferExisting(prev.shortlist_rules || {}, draftAllowed.shortlist_rules || {})
+      };
+      setTargetRolesInput((nextResume?.target_roles || []).join(", "));
+      setSkillsInput((nextResume?.skills || []).join(", "));
+      setEducationInput(nextResume?.education?.degree || "");
+      return nextConfig;
+    });
+  };
+
   const parseResumeUpload = () => {
     if (!resumeFile) {
       setOnboardingState("Choose a resume file first");
@@ -755,12 +990,12 @@ export default function App() {
       .catch((err) => setOnboardingState(`Resume parse failed: ${err.message}`));
   };
 
-  const saveOnboardingResume = () => {
+  const saveOnboardingResume = (resumePayload = onboardingConfig.resume_profile || {}) => {
     setOnboardingState("Saving resume/profile...");
     return fetch(`${API}/onboarding/config/resume-profile`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(onboardingConfig.resume_profile || {})
+      body: JSON.stringify(resumePayload || {})
     })
       .then(async (r) => {
         const data = await r.json().catch(() => ({}));
@@ -770,12 +1005,12 @@ export default function App() {
       .catch((err) => setOnboardingState(`Save failed: ${err.message}`));
   };
 
-  const saveOnboardingPreferences = () => {
+  const saveOnboardingPreferences = (preferencesPayload = onboardingConfig.preferences || {}) => {
     setOnboardingState("Saving preferences...");
     return fetch(`${API}/onboarding/config/preferences`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(onboardingConfig.preferences || {})
+      body: JSON.stringify(preferencesPayload || {})
     })
       .then(async (r) => {
         const data = await r.json().catch(() => ({}));
@@ -785,12 +1020,12 @@ export default function App() {
       .catch((err) => setOnboardingState(`Save failed: ${err.message}`));
   };
 
-  const saveOnboardingRules = () => {
+  const saveOnboardingRules = (rulesPayload = onboardingConfig.shortlist_rules || {}) => {
     setOnboardingState("Saving shortlist rules...");
     return fetch(`${API}/onboarding/config/shortlist-rules`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(onboardingConfig.shortlist_rules || {})
+      body: JSON.stringify(rulesPayload || {})
     })
       .then(async (r) => {
         const data = await r.json().catch(() => ({}));
@@ -800,12 +1035,12 @@ export default function App() {
       .catch((err) => setOnboardingState(`Save failed: ${err.message}`));
   };
 
-  const saveOnboardingSearches = () => {
+  const saveOnboardingSearches = (searchesPayload = onboardingConfig.searches || {}) => {
     setOnboardingState("Saving searches...");
     return fetch(`${API}/onboarding/config/searches`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(onboardingConfig.searches || {})
+      body: JSON.stringify(searchesPayload || {})
     })
       .then(async (r) => {
         const data = await r.json().catch(() => ({}));
@@ -816,13 +1051,13 @@ export default function App() {
       .catch((err) => setOnboardingState(`Save failed: ${err.message}`));
   };
 
-  const saveOnboardingAll = async () => {
+  const saveOnboardingAll = async (configPayload = onboardingConfig) => {
     try {
       await Promise.all([
-        saveOnboardingResume(),
-        saveOnboardingPreferences(),
-        saveOnboardingRules(),
-        saveOnboardingSearches()
+        saveOnboardingResume(configPayload.resume_profile || {}),
+        saveOnboardingPreferences(configPayload.preferences || {}),
+        saveOnboardingRules(configPayload.shortlist_rules || {}),
+        saveOnboardingSearches(configPayload.searches || {})
       ]);
       setOnboardingState("All onboarding config saved");
       fetchOnboardingStatus();
@@ -830,6 +1065,24 @@ export default function App() {
     } catch (_err) {
       // Individual save handlers already set detailed status text.
     }
+  };
+
+  const saveStep3All = async () => {
+    const nextResume = {
+      ...(onboardingConfig.resume_profile || {}),
+      target_roles: parseCommaList(targetRolesInput),
+      skills: parseCommaList(skillsInput),
+      education: {
+        ...(onboardingConfig.resume_profile?.education || {}),
+        degree: educationInput || ""
+      }
+    };
+    const nextConfig = {
+      ...onboardingConfig,
+      resume_profile: nextResume
+    };
+    setOnboardingConfig(nextConfig);
+    await saveOnboardingAll(nextConfig);
   };
 
   const runOnboardingPreflight = () => {
@@ -1105,9 +1358,9 @@ export default function App() {
     const ok = window.confirm("Start a new run? This will fetch fresh jobs and update today’s data.");
     if (!ok) return;
     if (!selectedSearch) {
-      setRunLog("Please configure a search in Onboarding Step 5 before starting.\n");
+      setRunLog("Please configure a search in Onboarding Step 3 before starting.\n");
       setTab("onboarding");
-      setOnboardingStep(5);
+      setOnboardingStep(3);
       return;
     }
 
@@ -1428,9 +1681,9 @@ export default function App() {
           <div className="panel">
             <h2>Onboarding Wizard</h2>
             <div className="pipeline-buttons">
-              {[1, 2, 3, 4, 5, 6, 7].map((n) => (
-                <button key={n} className={classNames(onboardingStep === n && "active")} onClick={() => setOnboardingStep(n)}>
-                  Step {n}
+              {[{ id: 1, label: "Step 1" }, { id: 2, label: "Step 2" }, { id: 3, label: "Step 3" }, { id: 7, label: "Step 4" }].map((step) => (
+                <button key={step.id} className={classNames(onboardingStep === step.id && "active")} onClick={() => setOnboardingStep(step.id)}>
+                  {step.label}
                 </button>
               ))}
             </div>
@@ -1493,63 +1746,68 @@ export default function App() {
 
           {onboardingStep === 3 && (
             <div className="panel">
-              <h3>Step 3: Resume / Profile</h3>
+              <h3>Step 3: Unified Setup</h3>
+              <div className="helper-block">
+                <strong className="top-emphasis">Recommended:</strong> provide both inputs. Upload your resume and also write detailed plain-English context below.
+              </div>
+              <div className="helper-block">
+                Include in written context: target roles, strongest skills, industries you want, locations, salary floor, workplace preference (remote/hybrid/onsite),
+                experience level, hard constraints, and what to avoid.
+              </div>
+              <div className="helper-block">
+                Process: generate one draft preview from resume + intake, apply preview to form, review/edit below, then save all config blocks.
+              </div>
               <div className="field">
                 <label>Target roles (comma separated)</label>
                 <input
-                  value={(onboardingConfig.resume_profile?.target_roles || []).join(", ")}
-                  onChange={(e) =>
-                    setOnboardingConfig((prev) => ({
-                      ...prev,
-                      resume_profile: {
-                        ...(prev.resume_profile || {}),
-                        target_roles: e.target.value.split(",").map((t) => t.trim()).filter(Boolean)
-                      }
-                    }))
-                  }
+                  value={targetRolesInput}
+                  placeholder="e.g. Operations Analyst, Project Coordinator, Business Analyst"
+                  onChange={(e) => {
+                    const cleaned = sanitizeCommaListInput(e.target.value);
+                    setTargetRolesInput(cleaned);
+                  }}
+                  onBlur={() => {
+                    const formatted = formatCommaListDisplay(targetRolesInput);
+                    setTargetRolesInput(formatted);
+                  }}
                 />
               </div>
               <div className="field">
                 <label>Skills (comma separated)</label>
                 <input
-                  value={(onboardingConfig.resume_profile?.skills || []).join(", ")}
-                  onChange={(e) =>
-                    setOnboardingConfig((prev) => ({
-                      ...prev,
-                      resume_profile: {
-                        ...(prev.resume_profile || {}),
-                        skills: e.target.value.split(",").map((t) => t.trim()).filter(Boolean)
-                      }
-                    }))
-                  }
+                  value={skillsInput}
+                  placeholder="e.g. Excel, SQL, Stakeholder Communication, Process Improvement"
+                  onChange={(e) => {
+                    const cleaned = sanitizeCommaListInput(e.target.value);
+                    setSkillsInput(cleaned);
+                  }}
+                  onBlur={() => {
+                    const formatted = formatCommaListDisplay(skillsInput);
+                    setSkillsInput(formatted);
+                  }}
                 />
               </div>
               <div className="field">
                 <label>Education summary</label>
                 <input
-                  value={onboardingConfig.resume_profile?.education?.degree || ""}
-                  onChange={(e) =>
-                    setOnboardingConfig((prev) => ({
-                      ...prev,
-                      resume_profile: {
-                        ...(prev.resume_profile || {}),
-                        education: { ...(prev.resume_profile?.education || {}), degree: e.target.value }
-                      }
-                    }))
-                  }
+                  value={educationInput}
+                  placeholder="e.g. B.S. in Business Administration, DePaul University"
+                  onChange={(e) => {
+                    setEducationInput(e.target.value);
+                  }}
                 />
               </div>
               <div className="field">
-                <label>Plain-English intake (optional)</label>
+                <label>Plain-English intake (required)</label>
                 <textarea
-                  rows="4"
+                  rows="6"
                   value={profileDraftInput}
                   onChange={(e) => setProfileDraftInput(e.target.value)}
-                  placeholder="Describe your background and what you want in your next job."
+                  placeholder="Describe your background and your target job in detail. Include role targets, must-have skills, industries, preferred locations, salary floor, workplace preference, hard constraints, and what to avoid."
                 />
               </div>
               <div className="field">
-                <label>Resume upload (TXT/DOCX/PDF)</label>
+                <label>Resume upload (TXT/DOCX/PDF, required)</label>
                 <input
                   type="file"
                   accept=".txt,.md,.docx,.pdf"
@@ -1557,24 +1815,14 @@ export default function App() {
                 />
               </div>
               <div className="actions">
-                <button onClick={runProfileDraft}>Generate draft profile</button>
-                <button onClick={parseResumeUpload}>Parse uploaded resume</button>
-                <button onClick={saveOnboardingResume}>Save resume/profile</button>
+                <button onClick={generateUnifiedDraftPreview}>Generate Draft Preview (Resume + Intake Required)</button>
                 {profileDraftResult && (
-                  <button
-                    onClick={() =>
-                      setOnboardingConfig((prev) => ({
-                        ...prev,
-                        resume_profile: profileDraftResult.resume_profile || prev.resume_profile,
-                        preferences: profileDraftResult.preferences || prev.preferences,
-                        shortlist_rules: profileDraftResult.shortlist_rules || prev.shortlist_rules,
-                        searches: profileDraftResult.searches || prev.searches
-                      }))
-                    }
-                  >
-                    Apply draft to form
+                  <button onClick={applyDraftPreviewToForm}>
+                    Apply Preview to Form (Merge)
                   </button>
                 )}
+                <button className="primary" onClick={saveStep3All}>Save all config blocks</button>
+                <button onClick={fetchOnboardingConfig}>Reload saved config</button>
               </div>
               {resumeParseMeta && (
                 <div className="status">
@@ -1582,85 +1830,27 @@ export default function App() {
                   {resumeParseMeta.ai_used ? " using AI assist" : " using local heuristic parser"}
                 </div>
               )}
-              {profileDraftResult && (
-                <pre className="log">{JSON.stringify(profileDraftResult, null, 2)}</pre>
-              )}
-            </div>
-          )}
-
-          {onboardingStep === 4 && (
-            <div className="panel">
-              <h3>Step 4: Preferences + Rules</h3>
-              <div className="field">
-                <label>Minimum match score</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={onboardingConfig.preferences?.qualification?.min_match_score ?? 0.55}
-                  onChange={(e) =>
-                    setOnboardingConfig((prev) => ({
-                      ...prev,
-                      preferences: {
-                        ...(prev.preferences || {}),
-                        qualification: {
-                          ...(prev.preferences?.qualification || {}),
-                          min_match_score: Number(e.target.value)
-                        }
-                      }
-                    }))
-                  }
-                />
+              <h4>Config Comparison</h4>
+              <div className="config-compare">
+                <div className="config-compare-panel">
+                  <div className="config-compare-title">Generated Draft Preview</div>
+                  <pre className="log config-compare-log">
+                    {JSON.stringify(normalizeConfigForDisplay(projectComparableConfig(profileDraftResult || {})), null, 2)}
+                  </pre>
+                </div>
+                <div className="config-compare-panel">
+                  <div className="config-compare-title">Current Config (Review Snapshot)</div>
+                  <pre className="log config-compare-log">
+                    {JSON.stringify(normalizeConfigForDisplay(projectComparableConfig(onboardingConfig)), null, 2)}
+                  </pre>
+                </div>
               </div>
-              <div className="field">
-                <label>Minimum base salary (optional)</label>
-                <input
-                  type="number"
-                  value={onboardingConfig.preferences?.hard_constraints?.min_base_salary_usd ?? ""}
-                  onChange={(e) =>
-                    setOnboardingConfig((prev) => ({
-                      ...prev,
-                      preferences: {
-                        ...(prev.preferences || {}),
-                        hard_constraints: {
-                          ...(prev.preferences?.hard_constraints || {}),
-                          min_base_salary_usd: e.target.value === "" ? null : Number(e.target.value)
-                        }
-                      }
-                    }))
-                  }
-                />
+              <h4>Preferences + Rules</h4>
+              <div className="helper-block">
+                Preferences and shortlist rules are auto-generated from your resume + intake.
+                If you need advanced tuning later, use the <strong className="top-emphasis">Settings</strong> tab.
               </div>
-              <div className="field checkbox">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={!!onboardingConfig.preferences?.hard_constraints?.no_cold_calling}
-                    onChange={(e) =>
-                      setOnboardingConfig((prev) => ({
-                        ...prev,
-                        preferences: {
-                          ...(prev.preferences || {}),
-                          hard_constraints: {
-                            ...(prev.preferences?.hard_constraints || {}),
-                            no_cold_calling: e.target.checked
-                          }
-                        }
-                      }))
-                    }
-                  />
-                  No cold calling
-                </label>
-              </div>
-              <div className="actions">
-                <button onClick={saveOnboardingPreferences}>Save preferences</button>
-                <button onClick={saveOnboardingRules}>Save shortlist rules</button>
-              </div>
-            </div>
-          )}
-
-          {onboardingStep === 5 && (
-            <div className="panel">
-              <h3>Step 5: Search Setup</h3>
+              <h4>Search Setup</h4>
               <div className="field">
                 <label>Label</label>
                 <input
@@ -1694,7 +1884,7 @@ export default function App() {
               </div>
               <div className="actions">
                 <button onClick={addOnboardingSearch}>Add search</button>
-                <button onClick={saveOnboardingSearches}>Save searches</button>
+                <button onClick={saveOnboardingSearches}>Save searches only</button>
               </div>
               <ul>
                 {Object.entries(onboardingConfig.searches || {}).map(([label, cfg]) => (
@@ -1704,23 +1894,17 @@ export default function App() {
                   </li>
                 ))}
               </ul>
-            </div>
-          )}
-
-          {onboardingStep === 6 && (
-            <div className="panel">
-              <h3>Step 6: Review & Save</h3>
-              <div className="actions">
-                <button className="primary" onClick={saveOnboardingAll}>Save all config blocks</button>
-                <button onClick={fetchOnboardingConfig}>Reload from backend</button>
-              </div>
-              <pre className="log">{JSON.stringify(onboardingConfig, null, 2)}</pre>
+              {!profileDraftResult && (
+                <div className="helper-block">
+                  Generate a draft preview to compare changes side by side before you apply or save.
+                </div>
+              )}
             </div>
           )}
 
           {onboardingStep === 7 && (
             <div className="panel">
-              <h3>Step 7: Preflight + First Run</h3>
+              <h3>Step 4: Preflight + First Run</h3>
               <div className="actions">
                 <button onClick={runOnboardingPreflight}>Run preflight</button>
                 <button onClick={() => setTab("pipeline")}>Go to Pipeline</button>
@@ -2620,8 +2804,8 @@ export default function App() {
                 <div className="warning">
                   No searches configured. Go to onboarding search setup.
                   {" "}
-                  <button onClick={() => { setTab("onboarding"); setOnboardingStep(5); }}>
-                    Open Onboarding Step 5
+                  <button onClick={() => { setTab("onboarding"); setOnboardingStep(3); }}>
+                    Open Onboarding Step 3
                   </button>
                 </div>
               )}
@@ -2791,19 +2975,17 @@ export default function App() {
                   <div>
                     <div>Ready: {String(!!pipelinePreflight.ready)}</div>
                     <ul>
-                      {(pipelinePreflight.checks || []).map((check) => {
-                        const status = "fail";
-                        const fixHint = check.fix_hint || defaultFixHintForCheck(check.id);
-                        return (
-                          <li key={`pipeline-preflight-${check.id}`}>
-                            <span className={`check-status ${checkStatusTone(status)}`}>[{status}]</span>{" "}
-                            {check.id}: {failedCheckMessage(check, status)}
+                      {(pipelinePreflight.checks || []).map((check) => (
+                        <li key={`pipeline-preflight-${check.id}`}>
+                          <span className={`check-status ${checkStatusTone(check.status)}`}>[{check.status}]</span>{" "}
+                          {check.id}: {failedCheckMessage(check, check.status)}
+                          {check.status !== "pass" && (check.fix_hint || defaultFixHintForCheck(check.id)) ? (
                             <div className="check-fix-line">
-                              <strong className="fix-label">FIX:</strong> {fixHint}
+                              <strong className="fix-label">FIX:</strong> {check.fix_hint || defaultFixHintForCheck(check.id)}
                             </div>
-                          </li>
-                        );
-                      })}
+                          ) : ""}
+                        </li>
+                      ))}
                     </ul>
                   </div>
                 ) : (

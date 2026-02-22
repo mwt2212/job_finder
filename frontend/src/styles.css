@@ -935,6 +935,30 @@ section {
   padding: 10px 0;
 }
 
+.config-compare {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.config-compare-panel {
+  min-width: 0;
+}
+
+.config-compare-title {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.config-compare-log {
+  margin-top: 0;
+  max-height: 340px;
+}
+
 .search-undo-row {
   margin: 6px 0 10px;
 }
