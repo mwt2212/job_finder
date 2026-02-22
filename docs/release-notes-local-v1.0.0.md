@@ -5,16 +5,26 @@
 - This release does not target hosted multi-user deployment.
 
 ## Getting Started (Concise)
-1. Install backend dependencies and Playwright browser.
-2. Install frontend dependencies.
-3. Start backend.
-4. Start frontend.
-5. Complete Onboarding bootstrap + preflight.
-6. Run pipeline in `Test` size first.
+1. Run one-command setup script.
+2. Launch app with one-click start script.
+4. Complete Onboarding bootstrap + preflight.
+5. Run pipeline in `Test` size first.
+
+One-command setup (Windows, from repo root):
+
+```bat
+scripts\setup-local.bat
+```
+
+One-click local start (Windows, from repo root):
+
+```bat
+scripts\start-local.bat
+```
 
 ## Installation Commands (Windows, from repo root)
 
-Backend:
+Manual backend setup:
 
 ```powershell
 cd backend
@@ -25,7 +35,7 @@ python -m playwright install chromium
 cd ..
 ```
 
-Frontend:
+Manual frontend setup:
 
 ```powershell
 cd frontend
@@ -36,7 +46,9 @@ cd ..
 Run:
 
 ```powershell
-python run-backend.py
+backend\.venv\Scripts\python.exe run-backend.py
+```
+```powershell
 cd frontend
 npm run dev
 ```
@@ -46,6 +58,10 @@ npm run dev
 - `VITE_API_BASE` (optional; default `http://127.0.0.1:8001`)
 - `JOBFINDER_CHROME_PROFILE` (optional; defaults to repo-local `chrome-profile/`)
 - `JOBFINDER_VIEWPORT` (optional; format `WIDTHxHEIGHT`)
+
+`frontend/.env` note:
+- Usually optional for local use.
+- Use it only when overriding `VITE_API_BASE` to a non-default backend URL.
 
 ## Operational Notes
 - Pipeline execution order is fixed: `scout -> shortlist -> scrape -> eval`.
@@ -69,4 +85,3 @@ npm run dev
 - Backend tests: `pytest -q backend/tests` -> pass
 - Frontend build: `cd frontend && npm run build` -> pass
 - Local smoke script: `scripts/local-smoke.ps1` -> pass (see checklist notes)
-

@@ -45,27 +45,20 @@ Data boundaries:
 
 ## Quick Start
 
-Minimal local start (Windows):
-1. Backend setup:
-```powershell
-cd backend; python -m venv .venv; .\.venv\Scripts\Activate.ps1; pip install -r requirements.txt; python -m playwright install chromium; cd ..
+Path A (Recommended): one-command install + one-click start (Windows)
+1. Install once (run from repo root):
+```bat
+scripts\setup-local.bat
 ```
-2. Frontend setup:
-```powershell
-cd frontend; npm install; cd ..
+2. Start app (backend + frontend + browser):
+```bat
+scripts\start-local.bat
 ```
-3. Start backend:
-```powershell
-python run-backend.py
-```
-4. Start frontend (new terminal):
-```powershell
-cd frontend; npm run dev
-```
-Then open `http://localhost:5173` and complete Onboarding Step 1 (`bootstrap`) before pipeline runs.
+This opens `http://localhost:5173` and starts both services in separate terminals.
 
-Backend:
+Path B (Manual): step-by-step install + manual start
 
+Backend install:
 ```powershell
 cd backend
 python -m venv .venv
@@ -73,32 +66,27 @@ python -m venv .venv
 pip install -r requirements.txt
 python -m playwright install chromium
 cd ..
-python run-backend.py
 ```
 
-Frontend:
-
+Frontend install:
 ```powershell
 cd frontend
 npm install
+cd ..
+```
+
+Manual start:
+```powershell
+backend\.venv\Scripts\python.exe run-backend.py
+```
+```powershell
+cd frontend
 npm run dev
 ```
 
-Open `http://localhost:5173`.
+Then open `http://localhost:5173`.
 
-Windows one-command setup (run once per shell):
-
-Backend setup:
-
-```powershell
-cd backend; python -m venv .venv; .\.venv\Scripts\Activate.ps1; pip install -r requirements.txt; python -m playwright install chromium; cd ..
-```
-
-Frontend setup:
-
-```powershell
-cd frontend; npm install; cd ..
-```
+After first launch, complete Onboarding Step 1 (`bootstrap`) before pipeline runs.
 
 ## Onboarding (Recommended First Run)
 
@@ -166,6 +154,11 @@ Frontend env setup:
 cd frontend
 copy .env.example .env
 ```
+
+When `frontend/.env` is needed:
+- Optional for most users.
+- Needed only if frontend should call a non-default backend URL.
+- Default already works locally: `VITE_API_BASE=http://127.0.0.1:8001`.
 
 Profile/template file precedence:
 - Resume profile: `resume_profile.local.json` -> `resume_profile.json` -> `resume_profile.example.json`
