@@ -7,14 +7,15 @@
 ## Getting Started (Concise)
 1. Run one-command setup script.
 2. Launch app with one-click start script.
-4. Complete Onboarding bootstrap + preflight.
-5. Run pipeline in `Test` size first.
+3. Complete Onboarding bootstrap + preflight.
+4. Run pipeline in `Test` size first.
 
 One-command setup (Windows, from repo root):
 
 ```bat
 scripts\setup-local.bat
 ```
+This script checks whether `OPENAI_API_KEY` is currently set and prints guidance if missing.
 
 One-click local start (Windows, from repo root):
 
@@ -58,6 +59,27 @@ npm run dev
 - `VITE_API_BASE` (optional; default `http://127.0.0.1:8001`)
 - `JOBFINDER_CHROME_PROFILE` (optional; defaults to repo-local `chrome-profile/`)
 - `JOBFINDER_VIEWPORT` (optional; format `WIDTHxHEIGHT`)
+
+Windows example:
+```bat
+setx OPENAI_API_KEY "your_key_here"
+```
+Then open a new terminal before launching the app.
+
+OpenAI API key and billing setup:
+1. Sign in at `https://platform.openai.com/`.
+2. Create a key at `https://platform.openai.com/api-keys`.
+3. Add billing/credits in OpenAI billing settings.
+4. Set `OPENAI_API_KEY` locally (command above), then relaunch terminals.
+
+AI eval budget guide (approx jobs per $1):
+- Token baseline used: ~`1331` input + ~`244` output tokens per evaluated job (from local usage totals).
+- Estimated jobs per $1 (about +/-20% variance):
+  - `gpt-4.1-mini`: ~`1083` (`~902-1354`)
+  - `gpt-5-mini`: ~`1217` (`~1014-1521`)
+  - `gpt-4.1`: ~`217` (`~180-271`)
+  - `gpt-5` / `gpt-5.1`: ~`243` (`~203-304`)
+- Actual costs vary with prompt size, response length, and number of eligible jobs.
 
 `frontend/.env` note:
 - Usually optional for local use.

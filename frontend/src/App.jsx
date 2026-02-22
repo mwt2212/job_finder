@@ -1285,7 +1285,7 @@ export default function App() {
                   {onboardingStatus.checks.map((check) => (
                     <li key={check.id}>
                       [{check.status}] {check.id}: {check.message}
-                      {check.fix_hint ? ` | fix: ${check.fix_hint}` : ""}
+                      {check.status !== "pass" && check.fix_hint ? ` | fix: ${check.fix_hint}` : ""}
                     </li>
                   ))}
                 </ul>
@@ -1563,7 +1563,7 @@ export default function App() {
                     {(onboardingPreflight.checks || []).map((check) => (
                       <li key={`pf-${check.id}`}>
                         [{check.status}] {check.id}: {check.message}
-                        {check.fix_hint ? ` | fix: ${check.fix_hint}` : ""}
+                        {check.status !== "pass" && check.fix_hint ? ` | fix: ${check.fix_hint}` : ""}
                       </li>
                     ))}
                   </ul>
@@ -2457,7 +2457,7 @@ export default function App() {
                     {(pipelinePreflight.checks || []).map((check) => (
                       <li key={`pipeline-preflight-${check.id}`}>
                         [{check.status}] {check.id}: {check.message}
-                        {check.fix_hint ? ` | fix: ${check.fix_hint}` : ""}
+                        {check.status !== "pass" && check.fix_hint ? ` | fix: ${check.fix_hint}` : ""}
                       </li>
                     ))}
                   </ul>

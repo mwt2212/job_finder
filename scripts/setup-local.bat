@@ -53,6 +53,17 @@ if exist "%FRONTEND%\.env.example" (
 )
 
 echo.
+if "%OPENAI_API_KEY%"=="" (
+  echo [setup] OPENAI_API_KEY is not set in this shell.
+  echo [setup] AI features are core to this app and will be blocked until the key is set.
+  echo [setup] Set it before first run, then restart terminals:
+  echo [setup]   setx OPENAI_API_KEY "your_key_here"
+  echo [setup] or for current shell only:
+  echo [setup]   set OPENAI_API_KEY=your_key_here
+) else (
+  echo [setup] OPENAI_API_KEY detected in current shell.
+)
+echo.
 echo Setup complete.
 echo Start app with:
 echo   scripts\start-local.bat
@@ -69,4 +80,3 @@ echo Usage: scripts\setup-local.bat
 echo Creates backend venv, installs backend deps, installs Playwright Chromium,
 echo installs frontend npm deps, and bootstraps frontend\.env if missing.
 exit /b 0
-

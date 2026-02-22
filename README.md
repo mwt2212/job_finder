@@ -50,6 +50,7 @@ Path A (Recommended): one-command install + one-click start (Windows)
 ```bat
 scripts\setup-local.bat
 ```
+   - Setup checks whether `OPENAI_API_KEY` is present and prints next steps if missing.
 2. Start app (backend + frontend + browser):
 ```bat
 scripts\start-local.bat
@@ -144,21 +145,49 @@ Environment variables:
 - `JOBFINDER_CHROME_PROFILE`: scraper browser profile directory
 - `JOBFINDER_VIEWPORT`: optional scraper viewport override as `WIDTHxHEIGHT` (example: `1280x1440`)
 
+Windows key setup example:
+```bat
+setx OPENAI_API_KEY "your_key_here"
+```
+Then open a new terminal before starting backend/frontend.
+
+OpenAI API key setup (where/how):
+1. Go to `https://platform.openai.com/` and sign in (or create an account).
+2. Create an API key at `https://platform.openai.com/api-keys`.
+3. Add billing/credits in the OpenAI platform billing section.
+4. Set the key locally:
+```bat
+setx OPENAI_API_KEY "your_key_here"
+```
+5. Open a new terminal and start the app.
+
+AI eval cost guide (approx jobs per $1):
+- Based on current `ai_pricing.json` and observed average `ai_eval` usage in `artifacts/ai_usage_totals.json`:
+  - avg input tokens/job: `~1331`
+  - avg output tokens/job: `~244`
+- Estimated jobs per $1 (about +/-20% token variance):
+  - `gpt-4.1-mini`: ~`1083` jobs (`~902-1354`)
+  - `gpt-5-mini`: ~`1217` jobs (`~1014-1521`)
+  - `gpt-4.1`: ~`217` jobs (`~180-271`)
+  - `gpt-5` / `gpt-5.1`: ~`243` jobs (`~203-304`)
+- Notes:
+  - Real cost depends on your selected model and job-description lengths.
+  - Not every scraped job is always eligible for AI eval; total pipeline spend can be lower than raw scraped counts suggest.
+  - Cover-letter generation is additional spend beyond eval.
+
 Portability defaults:
 - If `JOBFINDER_CHROME_PROFILE` is unset, scripts use repo-local `chrome-profile/`
 - If `JOBFINDER_VIEWPORT` is unset, scrapers auto-size to half monitor width and full monitor height
 
-Frontend env setup:
-
+Optional frontend env override:
+- `frontend/.env` is usually not required for local use.
+- Use it only when frontend should call a non-default backend URL.
+- Default already works locally: `VITE_API_BASE=http://127.0.0.1:8001`.
+- If you do need an override:
 ```powershell
 cd frontend
 copy .env.example .env
 ```
-
-When `frontend/.env` is needed:
-- Optional for most users.
-- Needed only if frontend should call a non-default backend URL.
-- Default already works locally: `VITE_API_BASE=http://127.0.0.1:8001`.
 
 Profile/template file precedence:
 - Resume profile: `resume_profile.local.json` -> `resume_profile.json` -> `resume_profile.example.json`
