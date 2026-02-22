@@ -6,6 +6,11 @@ Local-first job intelligence pipeline with a FastAPI backend, React dashboard, a
 
 ![Job Finder Dashboard](docs/dashboard-preview.png)
 
+## Local Release Docs
+- Release notes: `docs/release-notes-local-v1.0.0.md`
+- Smoke checklist: `docs/local-smoke-checklist.md`
+- Data backup/restore/recovery: `docs/local-data-and-recovery.md`
+
 ## Highlights
 
 - End-to-end pipeline: `scout -> shortlist -> scrape -> eval` (+ optional `sort`)
