@@ -63,7 +63,7 @@ Stage N complete. Continue to Stage N+1? (yes/no)
 - Stage 2: `completed`
 - Stage 3: `completed`
 - Stage 4: `completed`
-- Stage 5: `not_started`
+- Stage 5: `completed`
 - Stage 6: `not_started`
 
 Update statuses here as stages complete.
