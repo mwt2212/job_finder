@@ -60,7 +60,7 @@ Stage N complete. Continue to Stage N+1? (yes/no)
 ## Status Tracker
 - Stage 0: `completed`
 - Stage 1: `completed`
-- Stage 2: `not_started`
+- Stage 2: `completed`
 - Stage 3: `not_started`
 - Stage 4: `not_started`
 - Stage 5: `not_started`

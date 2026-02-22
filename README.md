@@ -107,6 +107,23 @@ Then:
 
 After this, pipeline runs can reuse the saved session automatically.
 
+LinkedIn setup runbook (exact checks):
+- Check current state:
+  - `GET /onboarding/linkedin/status`
+  - Expected success shape:
+    - `ok: true`
+    - `profile_exists: true`
+    - `message` indicates LinkedIn session check passed
+- If `ok: false`, run:
+  - `python setup-linkedin-profile.py`
+  - Sign in in opened browser
+  - Press Enter in terminal for script verification
+  - Re-run `GET /onboarding/linkedin/status`
+- Final gate before pipeline:
+  - `POST /onboarding/preflight`
+  - `ready` must be `true`
+  - `checks` should include `playwright_runtime` and `linkedin_session` with `status: pass`
+
 ## Configuration
 
 Environment variables:
@@ -213,6 +230,8 @@ Chrome profile lock error:
 LinkedIn login required during `scout` or `scrape`:
 - Run `python setup-linkedin-profile.py` once
 - Make sure the same `JOBFINDER_CHROME_PROFILE` path is used when running the backend/pipeline
+- If `JOBFINDER_CHROME_PROFILE` is unset, backend/scripts default to repo-local `chrome-profile/`
+- If `/onboarding/linkedin/status` says `LinkedIn session cookie (li_at) was not found`, rerun setup script and complete sign-in/checkpoint in that same profile
 
 Pipeline start blocked by preflight:
 - Open the `Onboarding` or `Pipeline` tab preflight panel
