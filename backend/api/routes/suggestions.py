@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
-from backend.domain.models.compat import SuggestionsApplyIn
+from backend.api import handlers
+from backend.domain.models.dto import SuggestionsApplyIn
 
 
 router = APIRouter()
@@ -8,13 +9,9 @@ router = APIRouter()
 
 @router.post("/suggestions/generate")
 def api_generate_suggestions():
-    from backend import app as app_module
-
-    return app_module.api_generate_suggestions()
+    return handlers.api_generate_suggestions()
 
 
 @router.post("/suggestions/apply")
 def api_apply_suggestions(payload: SuggestionsApplyIn):
-    from backend import app as app_module
-
-    return app_module.api_apply_suggestions(payload)
+    return handlers.api_apply_suggestions(payload)

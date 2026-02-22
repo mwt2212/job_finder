@@ -9,7 +9,8 @@ from fastapi.testclient import TestClient
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-import backend.app as app
+import backend.api.handlers as app
+import backend.app as backend_app
 import backend.db as db
 
 
@@ -93,7 +94,7 @@ def app_ctx(monkeypatch, tmp_path):
         app.RUN_STATE["status"] = None
         app.RUN_STATE["progress"] = {"current": 0, "total": 0, "pct": 0.0, "label": ""}
 
-    with TestClient(app.app) as client:
+    with TestClient(backend_app.app) as client:
         yield SimpleNamespace(
             app=app,
             db=db,

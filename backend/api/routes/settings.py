@@ -2,26 +2,22 @@ from typing import Any, Dict
 
 from fastapi import APIRouter
 
+from backend.api import handlers
+
 
 router = APIRouter()
 
 
 @router.get("/settings")
 def api_get_settings():
-    from backend import app as app_module
-
-    return app_module.api_get_settings()
+    return handlers.api_get_settings()
 
 
 @router.put("/settings")
 def api_put_settings(payload: Dict[str, Any]):
-    from backend import app as app_module
-
-    return app_module.api_put_settings(payload)
+    return handlers.api_put_settings(payload)
 
 
 @router.get("/searches")
 def api_get_searches():
-    from backend import app as app_module
-
-    return app_module.api_get_searches()
+    return handlers.api_get_searches()

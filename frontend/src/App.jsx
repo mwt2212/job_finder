@@ -847,8 +847,12 @@ export default function App() {
       .then((data) => {
         const items = data.searches || [];
         setSearches(items);
-        if (!selectedSearch && items.length) {
+        const selectedExists = items.some((s) => s.label === selectedSearch);
+        if (items.length && !selectedExists) {
           setSelectedSearch(items[0].label);
+        }
+        if (!items.length) {
+          setSelectedSearch("");
         }
       })
       .catch(() => {});

@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
-from backend.domain.models.compat import AiEvalFeedbackIn, RatingIn, ShortlistFeedbackIn, StatusIn
+from backend.api import handlers
+from backend.domain.models.dto import AiEvalFeedbackIn, RatingIn, ShortlistFeedbackIn, StatusIn
 
 
 router = APIRouter()
@@ -17,9 +18,7 @@ def api_list_jobs(
     source: str | None = None,
     require_description: bool | None = True,
 ):
-    from backend import app as app_module
-
-    return app_module.api_list_jobs(
+    return handlers.api_list_jobs(
         search=search,
         workplace=workplace,
         status=status,
@@ -33,34 +32,24 @@ def api_list_jobs(
 
 @router.get("/jobs/{job_id}")
 def api_get_job(job_id: int):
-    from backend import app as app_module
-
-    return app_module.api_get_job(job_id)
+    return handlers.api_get_job(job_id)
 
 
 @router.post("/ratings")
 def api_rate_job(payload: RatingIn):
-    from backend import app as app_module
-
-    return app_module.api_rate_job(payload)
+    return handlers.api_rate_job(payload)
 
 
 @router.post("/status")
 def api_status(payload: StatusIn):
-    from backend import app as app_module
-
-    return app_module.api_status(payload)
+    return handlers.api_status(payload)
 
 
 @router.post("/feedback/shortlist")
 def api_shortlist_feedback(payload: ShortlistFeedbackIn):
-    from backend import app as app_module
-
-    return app_module.api_shortlist_feedback(payload)
+    return handlers.api_shortlist_feedback(payload)
 
 
 @router.post("/feedback/ai")
 def api_ai_feedback(payload: AiEvalFeedbackIn):
-    from backend import app as app_module
-
-    return app_module.api_ai_feedback(payload)
+    return handlers.api_ai_feedback(payload)

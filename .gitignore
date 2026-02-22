@@ -15,3 +15,4 @@ cover_letter_templates.local.json
 preferences.local.json
 shortlist_rules.local.json
 searches.local.json
+frontend/dist/assets/index-*.js

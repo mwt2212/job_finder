@@ -9,7 +9,8 @@ from fastapi.testclient import TestClient
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-import backend.app as app
+import backend.api.handlers as app
+import backend.app as backend_app
 from backend.onboarding_validate import (
     validate_preferences,
     validate_resume_profile,
@@ -237,7 +238,7 @@ def test_onboarding_profile_draft_returns_structured_payload():
 
 
 def test_onboarding_resume_parse_txt_upload():
-    client = TestClient(app.app)
+    client = TestClient(backend_app.app)
     resp = client.post(
         "/onboarding/resume-parse",
         files={"file": ("resume.txt", b"Data analyst with Python and SQL in Denver, CO", "text/plain")},

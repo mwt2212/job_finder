@@ -73,7 +73,7 @@ Use this section as source of truth when resuming in a future session.
 - Stage 4: `completed`
 - Stage 5: `completed`
 - Stage 6: `completed`
-- Stage 7: `not_started`
+- Stage 7: `completed`
 
 Update these statuses in this file as stages complete.
 

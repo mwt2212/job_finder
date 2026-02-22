@@ -18,16 +18,20 @@ Local-first job intelligence pipeline with a FastAPI backend, React dashboard, a
 ## Architecture
 
 Core services:
-- `backend/app.py`: API routes, pipeline orchestration, imports, tuning hooks
-- `backend/db.py`: SQLite schema + persistence access layer
-- `frontend/src/App.jsx`: single-page dashboard UI
+- `backend/app.py`: composition root (lifespan, middleware, router includes)
+- `backend/api/handlers.py`: API handler implementations and shared backend helpers
+- `backend/api/routes/*`: route registration by feature slice
+- `backend/domain/services/*`: extracted business/service logic
+- `backend/infra/db/*`: schema + repository modules
+- `frontend/src/App.jsx`: dashboard shell with feature modules under `frontend/src/features/*`
 
 Pipeline scripts:
-- `job-scout.py`: LinkedIn job metadata capture
-- `shortlist.py`: rule + preference-based ranking
-- `deep-scrape-full.py`: full description scraping
-- `ai-eval.py`: structured AI fit analysis
-- `sort-results.py`: bucket into apply/review/skip
+- `pipeline/scout.py`: LinkedIn job metadata capture
+- `pipeline/shortlist.py`: rule + preference-based ranking
+- `pipeline/scrape.py`: full description scraping
+- `pipeline/eval.py`: structured AI fit analysis
+- `pipeline/sort.py`: bucket into apply/review/skip
+- Root scripts (`job-scout.py`, `shortlist.py`, `deep-scrape-full.py`, `ai-eval.py`, `sort-results.py`) are CLI compatibility wrappers
 
 Data boundaries:
 - Runtime data: `artifacts/`
