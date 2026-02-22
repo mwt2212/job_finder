@@ -71,7 +71,7 @@ Use this section as source of truth when resuming in a future session.
 - Stage 2: `completed`
 - Stage 3: `completed`
 - Stage 4: `completed`
-- Stage 5: `not_started`
+- Stage 5: `completed`
 - Stage 6: `not_started`
 - Stage 7: `not_started`
 
@@ -494,6 +494,7 @@ Each commit should be independently testable and deployable.
 - Pipeline code is in dedicated modules, wrappers preserve old CLI usage.
 - All existing functionality verified with automated tests and manual smoke checks.
 - API, config precedence, and artifact outputs remain behaviorally equivalent.
+
 
 
 

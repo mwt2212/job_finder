@@ -1,52 +1,16 @@
 import { useEffect, useRef, useState } from "react";
+import { API_BASE } from "./api/client";
+import { ENDPOINTS } from "./api/endpoints";
+import { classNames } from "./shared/utils/classNames";
+import { DEFAULT_PREFS, DEFAULT_RULES, SHORTLIST_REASONS } from "./shared/constants/settingsDefaults";
+import OnboardingTab from "./features/onboarding/OnboardingTab";
+import JobsTab from "./features/jobs/JobsTab";
+import SettingsTab from "./features/settings/SettingsTab";
+import CoverLettersTab from "./features/coverLetters/CoverLettersTab";
+import PipelineTab from "./features/pipeline/PipelineTab";
 
-const API = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8001";
-
-const DEFAULT_PREFS = {
-  industry_preferences: { soft_penalize: ["healthcare"] },
-  role_preferences: {
-    soft_penalize_sales_adjacent: true,
-    hard_block_outbound_cold_calling: true,
-    allow_minimal_outbound: true,
-    inbound_ok: true
-  },
-  qualification: {
-    signals: ["skills", "degree", "years"],
-    safe_vs_stretch_ratio: 0.7,
-    min_match_score: 0.55
-  },
-  employment: { hard_block_non_full_time: true },
-  travel: { penalty: 0 }
-};
-
-const DEFAULT_RULES = {
-  hard_reject_patterns: [],
-  not_entry_level_patterns: [],
-  optional_reject_patterns: [],
-  title_boosts: {},
-  company_penalties: {},
-  workplace_score: { remote: -6, hybrid: 12, onsite: 8, unknown: 2 },
-  recency_scoring: {
-    just_now: 25,
-    minutes_max: 22,
-    minutes_step: 5,
-    hours_start: 20,
-    days_start: 8
-  }
-};
-
-const SHORTLIST_REASONS = [
-  { label: "Wrong field", value: "wrong field" },
-  { label: "Not qualified", value: "not qualified" },
-  { label: "Salesy/outbound", value: "salesy" },
-  { label: "Healthcare", value: "healthcare" },
-  { label: "Low pay", value: "low pay" },
-  { label: "Onsite only", value: "onsite" }
-];
-
-function classNames(...items) {
-  return items.filter(Boolean).join(" ");
-}
+const API = API_BASE;
+const EP = ENDPOINTS;
 
 const MONTHS = [
   "January",
@@ -446,7 +410,7 @@ export default function App() {
 
   useEffect(() => {
     if (selectedId) {
-      fetch(`${API}/jobs/${selectedId}`)
+      fetch(`${API}${EP.job(selectedId)}`)
         .then((r) => r.json())
         .then((data) => {
           setSelected(data);
@@ -474,7 +438,7 @@ export default function App() {
       setLockStatesByVersion({});
       return;
     }
-    fetch(`${API}/jobs/${coverJobId}`)
+    fetch(`${API}${EP.job(coverJobId)}`)
       .then((r) => r.json())
       .then((data) => setCoverJob(data));
     fetchCoverLetters(coverJobId);
@@ -506,20 +470,20 @@ export default function App() {
     Object.entries(filters).forEach(([k, v]) => {
       if (v !== "" && v !== null && v !== undefined) params.set(k, v);
     });
-    fetch(`${API}/jobs?${params.toString()}`)
+    fetch(`${API}${EP.jobs()}?${params.toString()}`)
       .then((r) => r.json())
       .then(setJobs);
   };
 
   const fetchCoverJobs = () => {
-    fetch(`${API}/jobs`)
+    fetch(`${API}${EP.jobs()}`)
       .then((r) => r.json())
       .then(setCoverJobs)
       .catch(() => {});
   };
 
   const fetchCoverLetters = (jobId) => {
-    fetch(`${API}/cover-letters/${jobId}`)
+    fetch(`${API}${EP.coverLettersByJob(jobId)}`)
       .then((r) => r.json())
       .then((data) => {
         const items = data.items || [];
@@ -865,7 +829,7 @@ export default function App() {
 
 
   const fetchSettings = () => {
-    fetch(`${API}/settings`)
+    fetch(`${API}${EP.settings()}`)
       .then((r) => r.json())
       .then((data) => {
         setSettings({
@@ -878,7 +842,7 @@ export default function App() {
   };
 
   const fetchSearches = () => {
-    fetch(`${API}/searches`)
+    fetch(`${API}${EP.searches()}`)
       .then((r) => r.json())
       .then((data) => {
         const items = data.searches || [];
@@ -892,7 +856,7 @@ export default function App() {
 
   const saveSettings = () => {
     setSaveState("saving");
-    fetch(`${API}/settings`, {
+    fetch(`${API}${EP.settings()}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(settings)
@@ -902,7 +866,7 @@ export default function App() {
   };
 
   const importExisting = () => {
-    fetch(`${API}/import`, {
+    fetch(`${API}${EP.import()}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({})
@@ -929,7 +893,7 @@ export default function App() {
         if (logSourceRef.current) {
           logSourceRef.current.close();
         }
-        const source = new EventSource(`${API}/runs/stream`);
+        const source = new EventSource(`${API}${EP.runsStream()}`);
         logSourceRef.current = source;
 
         source.onopen = () => {
@@ -1024,7 +988,7 @@ export default function App() {
         if (logSourceRef.current) {
           logSourceRef.current.close();
         }
-        const source = new EventSource(`${API}/runs/stream`);
+        const source = new EventSource(`${API}${EP.runsStream()}`);
         logSourceRef.current = source;
 
         source.onopen = () => {
@@ -1066,7 +1030,7 @@ export default function App() {
   };
 
   const syncRunCursor = () => {
-    fetch(`${API}/runs/state`)
+    fetch(`${API}${EP.runsState()}`)
       .then((r) => r.json())
       .then((state) => {
         if (!state || !state.lines) return;
@@ -1076,7 +1040,7 @@ export default function App() {
   };
 
   const fetchRunState = (onlyProgress = false) => {
-    fetch(`${API}/runs/state`)
+    fetch(`${API}${EP.runsState()}`)
       .then((r) => r.json())
       .then((state) => {
         if (!state || !state.lines) return;
@@ -1291,7 +1255,7 @@ export default function App() {
         </div>
       </header>
 
-      {tab === "onboarding" && (
+      <OnboardingTab active={tab === "onboarding"}>
         <section className="settings">
           <div className="panel">
             <h2>Onboarding Wizard</h2>
@@ -1606,9 +1570,9 @@ export default function App() {
             </div>
           )}
         </section>
-      )}
+      </OnboardingTab>
 
-      {tab === "jobs" && (
+      <JobsTab active={tab === "jobs"}>
         <section className="jobs">
           <div className="filters">
             <input
@@ -2012,9 +1976,9 @@ export default function App() {
             </aside>
           </div>
         </section>
-      )}
+      </JobsTab>
 
-      {tab === "settings" && settingsLoaded && (
+      <SettingsTab active={tab === "settings" && settingsLoaded}>
         <section className="settings">
           <div className="settings-grid">
             <div className="panel">
@@ -2246,9 +2210,9 @@ export default function App() {
             </div>
           )}
         </section>
-      )}
+      </SettingsTab>
 
-      {tab === "cover" && (
+      <CoverLettersTab active={tab === "cover"}>
         <section className="cover">
           <div className="cover-layout">
             <div className="cover-list">
@@ -2437,9 +2401,9 @@ export default function App() {
             </div>
           </div>
         </section>
-      )}
+      </CoverLettersTab>
 
-      {tab === "pipeline" && (
+      <PipelineTab active={tab === "pipeline"}>
         <section className="pipeline">
           <div className="panel">
             <h2>Run Pipeline</h2>
@@ -2535,7 +2499,7 @@ export default function App() {
             <pre className="log" ref={logRef}>{runLog}</pre>
           </div>
         </section>
-      )}
+      </PipelineTab>
 
       {templateModalOpen && (
         <div className="modal-backdrop" onClick={() => setTemplateModalOpen(false)}>
