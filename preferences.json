@@ -11,7 +11,7 @@
   },
   "hard_constraints": {
     "no_cold_calling": true,
-    "min_base_salary_usd": null,
+    "min_base_salary_usd": 55000,
     "reject_if_comp_is_commission_only": true,
     "reject_if_contract_or_1099": true,
     "reject_if_comp_below_min_when_listed": true
@@ -69,7 +69,7 @@
       "years"
     ],
     "safe_vs_stretch_ratio": 0.7,
-    "min_match_score": 0.78
+    "min_match_score": 0.74
   },
   "employment": {
     "hard_block_non_full_time": true

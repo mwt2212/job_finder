@@ -413,6 +413,33 @@ section {
   gap: 18px;
 }
 
+.mode-switch {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.mode-switch button {
+  border: 1px solid var(--border);
+  background: #fffdf9;
+  color: var(--ink);
+  padding: 8px 12px;
+  border-radius: 999px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.mode-switch button.active {
+  background: var(--accent);
+  color: white;
+  border-color: transparent;
+}
+
+.json-editor {
+  min-height: 260px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
 .actions {
   display: flex;
   gap: 12px;

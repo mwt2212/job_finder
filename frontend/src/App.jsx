@@ -424,6 +424,22 @@ function mergeDraftPreferExisting(existing, draft) {
   return hasMeaningfulValue(existing) ? existing : draft;
 }
 
+function mergeDraftPreferDraft(existing, draft) {
+  if (Array.isArray(existing) || Array.isArray(draft)) {
+    const existingArr = Array.isArray(existing) ? existing : [];
+    const draftArr = Array.isArray(draft) ? draft : [];
+    return draftArr.length ? draftArr : existingArr;
+  }
+  if (typeof existing === "object" && existing && typeof draft === "object" && draft) {
+    const merged = { ...existing };
+    Object.keys(draft).forEach((key) => {
+      merged[key] = mergeDraftPreferDraft(existing?.[key], draft[key]);
+    });
+    return merged;
+  }
+  return hasMeaningfulValue(draft) ? draft : existing;
+}
+
 function badgeClass(group, value) {
   const v = (value || "").toLowerCase();
   if (!v) return "badge neutral";
@@ -479,6 +495,10 @@ export default function App() {
   const [settings, setSettings] = useState({ preferences: DEFAULT_PREFS, rules: DEFAULT_RULES });
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [saveState, setSaveState] = useState("");
+  const [settingsMode, setSettingsMode] = useState("basic");
+  const [advancedPrefsText, setAdvancedPrefsText] = useState("");
+  const [advancedRulesText, setAdvancedRulesText] = useState("");
+  const [advancedState, setAdvancedState] = useState("");
   const [runLog, setRunLog] = useState("");
   const [running, setRunning] = useState(false);
   const [activeStep, setActiveStep] = useState("");
@@ -822,7 +842,7 @@ export default function App() {
       .catch(() => setOnboardingStatus(null));
   };
 
-  const fetchOnboardingConfig = () => {
+  const fetchOnboardingConfig = (syncTopInputs = true) => {
     fetch(`${API}/onboarding/config`)
       .then((r) => r.json())
       .then((data) => {
@@ -833,9 +853,11 @@ export default function App() {
           searches: data.searches || {}
         };
         setOnboardingConfig(nextConfig);
-        setTargetRolesInput((nextConfig.resume_profile?.target_roles || []).join(", "));
-        setSkillsInput((nextConfig.resume_profile?.skills || []).join(", "));
-        setEducationInput(nextConfig.resume_profile?.education?.degree || "");
+        if (syncTopInputs) {
+          setTargetRolesInput((nextConfig.resume_profile?.target_roles || []).join(", "));
+          setSkillsInput((nextConfig.resume_profile?.skills || []).join(", "));
+          setEducationInput(nextConfig.resume_profile?.education?.degree || "");
+        }
       })
       .catch(() => {});
   };
@@ -940,23 +962,25 @@ export default function App() {
     }
   };
 
-  const applyDraftPreviewToForm = () => {
+  const buildStep3SeededResume = (baseResume) => ({
+    ...(baseResume || {}),
+    ...(parseCommaList(targetRolesInput).length ? { target_roles: parseCommaList(targetRolesInput) } : {}),
+    ...(parseCommaList(skillsInput).length ? { skills: parseCommaList(skillsInput) } : {}),
+    ...(String(educationInput || "").trim()
+      ? {
+          education: {
+            ...(baseResume?.education || {}),
+            degree: educationInput
+          }
+        }
+      : {})
+  });
+
+  const applyDraftPreviewRecommended = () => {
     if (!profileDraftResult) return;
     const draftAllowed = selectDraftUpdatableFields(profileDraftResult);
     setOnboardingConfig((prev) => {
-      const seededResume = {
-        ...(prev.resume_profile || {}),
-        ...(parseCommaList(targetRolesInput).length ? { target_roles: parseCommaList(targetRolesInput) } : {}),
-        ...(parseCommaList(skillsInput).length ? { skills: parseCommaList(skillsInput) } : {}),
-        ...(String(educationInput || "").trim()
-          ? {
-              education: {
-                ...(prev.resume_profile?.education || {}),
-                degree: educationInput
-              }
-            }
-          : {})
-      };
+      const seededResume = buildStep3SeededResume(prev.resume_profile || {});
       const nextResume = mergeDraftPreferExisting(seededResume, draftAllowed.resume_profile || {});
       const nextConfig = {
         ...prev,
@@ -969,6 +993,26 @@ export default function App() {
       setEducationInput(nextResume?.education?.degree || "");
       return nextConfig;
     });
+    setOnboardingState("Applied preview (recommended merge).");
+  };
+
+  const applyDraftPreviewReplaceMore = () => {
+    if (!profileDraftResult) return;
+    setOnboardingConfig((prev) => {
+      const seededResume = buildStep3SeededResume(prev.resume_profile || {});
+      const nextResume = mergeDraftPreferDraft(seededResume, profileDraftResult.resume_profile || {});
+      const nextConfig = {
+        ...prev,
+        resume_profile: nextResume,
+        preferences: mergeDraftPreferDraft(prev.preferences || {}, profileDraftResult.preferences || {}),
+        shortlist_rules: mergeDraftPreferDraft(prev.shortlist_rules || {}, profileDraftResult.shortlist_rules || {})
+      };
+      setTargetRolesInput((nextResume?.target_roles || []).join(", "));
+      setSkillsInput((nextResume?.skills || []).join(", "));
+      setEducationInput(nextResume?.education?.degree || "");
+      return nextConfig;
+    });
+    setOnboardingState("Applied preview (replace more). Review before saving.");
   };
 
   const parseResumeUpload = () => {
@@ -1068,13 +1112,19 @@ export default function App() {
   };
 
   const saveStep3All = async () => {
+    const parsedRoles = parseCommaList(targetRolesInput);
+    const parsedSkills = parseCommaList(skillsInput);
+    const trimmedEducation = String(educationInput || "").trim();
     const nextResume = {
       ...(onboardingConfig.resume_profile || {}),
-      target_roles: parseCommaList(targetRolesInput),
-      skills: parseCommaList(skillsInput),
+      target_roles: parsedRoles.length ? parsedRoles : (onboardingConfig.resume_profile?.target_roles || []),
+      skills: parsedSkills.length ? parsedSkills : (onboardingConfig.resume_profile?.skills || []),
       education: {
         ...(onboardingConfig.resume_profile?.education || {}),
-        degree: educationInput || ""
+        degree:
+          trimmedEducation ||
+          onboardingConfig.resume_profile?.education?.degree ||
+          ""
       }
     };
     const nextConfig = {
@@ -1143,10 +1193,13 @@ export default function App() {
     fetch(`${API}${EP.settings()}`)
       .then((r) => r.json())
       .then((data) => {
-        setSettings({
+        const next = {
           preferences: data.preferences || DEFAULT_PREFS,
           rules: data.rules || DEFAULT_RULES
-        });
+        };
+        setSettings(next);
+        setAdvancedPrefsText(JSON.stringify(next.preferences || {}, null, 2));
+        setAdvancedRulesText(JSON.stringify(next.rules || {}, null, 2));
         setSettingsLoaded(true);
       })
       .catch(() => setSettingsLoaded(true));
@@ -1282,6 +1335,91 @@ export default function App() {
     })
       .then(() => setSaveState("saved"))
       .catch(() => setSaveState("error"));
+  };
+
+  const validateAdvancedSettings = async (prefsObj, rulesObj) => {
+    const [prefsRes, rulesRes] = await Promise.all([
+      fetch(`${API}/onboarding/validate/preferences`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(prefsObj || {})
+      }).then((r) => r.json()),
+      fetch(`${API}/onboarding/validate/shortlist-rules`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(rulesObj || {})
+      }).then((r) => r.json())
+    ]);
+    return { prefsRes, rulesRes };
+  };
+
+  const parseAdvancedJson = () => {
+    try {
+      const prefsObj = JSON.parse(advancedPrefsText || "{}");
+      const rulesObj = JSON.parse(advancedRulesText || "{}");
+      return { prefsObj, rulesObj, error: "" };
+    } catch (err) {
+      return { prefsObj: null, rulesObj: null, error: `JSON parse error: ${err.message}` };
+    }
+  };
+
+  const runAdvancedValidate = async () => {
+    const parsed = parseAdvancedJson();
+    if (parsed.error) {
+      setAdvancedState(parsed.error);
+      return;
+    }
+    setAdvancedState("Validating...");
+    try {
+      const { prefsRes, rulesRes } = await validateAdvancedSettings(parsed.prefsObj, parsed.rulesObj);
+      const prefErrors = prefsRes?.errors || [];
+      const ruleErrors = rulesRes?.errors || [];
+      if ((prefsRes?.ok ?? false) && (rulesRes?.ok ?? false)) {
+        setAdvancedState("Validation passed");
+      } else {
+        const details = [
+          prefErrors.length ? `preferences: ${prefErrors.join(" | ")}` : "",
+          ruleErrors.length ? `shortlist_rules: ${ruleErrors.join(" | ")}` : ""
+        ].filter(Boolean).join(" || ");
+        setAdvancedState(`Validation failed: ${details}`);
+      }
+    } catch (err) {
+      setAdvancedState(`Validation failed: ${err.message}`);
+    }
+  };
+
+  const saveAdvancedSettings = async () => {
+    const parsed = parseAdvancedJson();
+    if (parsed.error) {
+      setAdvancedState(parsed.error);
+      return;
+    }
+    setAdvancedState("Validating...");
+    try {
+      const { prefsRes, rulesRes } = await validateAdvancedSettings(parsed.prefsObj, parsed.rulesObj);
+      if (!(prefsRes?.ok ?? false) || !(rulesRes?.ok ?? false)) {
+        const prefErrors = prefsRes?.errors || [];
+        const ruleErrors = rulesRes?.errors || [];
+        const details = [
+          prefErrors.length ? `preferences: ${prefErrors.join(" | ")}` : "",
+          ruleErrors.length ? `shortlist_rules: ${ruleErrors.join(" | ")}` : ""
+        ].filter(Boolean).join(" || ");
+        setAdvancedState(`Validation failed: ${details}`);
+        return;
+      }
+      setSaveState("saving");
+      await fetch(`${API}${EP.settings()}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ preferences: parsed.prefsObj, rules: parsed.rulesObj })
+      });
+      setSettings({ preferences: parsed.prefsObj, rules: parsed.rulesObj });
+      setSaveState("saved");
+      setAdvancedState("Advanced settings saved");
+    } catch (err) {
+      setSaveState("error");
+      setAdvancedState(`Save failed: ${err.message}`);
+    }
   };
 
   const importExisting = () => {
@@ -1817,12 +1955,17 @@ export default function App() {
               <div className="actions">
                 <button onClick={generateUnifiedDraftPreview}>Generate Draft Preview (Resume + Intake Required)</button>
                 {profileDraftResult && (
-                  <button onClick={applyDraftPreviewToForm}>
-                    Apply Preview to Form (Merge)
+                  <button onClick={applyDraftPreviewRecommended}>
+                    Apply Preview (Recommended)
+                  </button>
+                )}
+                {profileDraftResult && (
+                  <button onClick={applyDraftPreviewReplaceMore}>
+                    Apply Preview (Replace More)
                   </button>
                 )}
                 <button className="primary" onClick={saveStep3All}>Save all config blocks</button>
-                <button onClick={fetchOnboardingConfig}>Reload saved config</button>
+                <button onClick={() => fetchOnboardingConfig(false)}>Reload saved config</button>
               </div>
               {resumeParseMeta && (
                 <div className="status">
@@ -2342,7 +2485,18 @@ export default function App() {
 
       <SettingsTab active={tab === "settings" && settingsLoaded}>
         <section className="settings">
-          <div className="settings-grid">
+          <div className="mode-switch">
+            <button className={classNames(settingsMode === "basic" && "active")} onClick={() => setSettingsMode("basic")}>
+              Basic
+            </button>
+            <button className={classNames(settingsMode === "advanced" && "active")} onClick={() => setSettingsMode("advanced")}>
+              Advanced
+            </button>
+          </div>
+
+          {settingsMode === "basic" && (
+            <>
+              <div className="settings-grid">
             <div className="panel">
               <h2>Preferences</h2>
               <div className="field">
@@ -2570,6 +2724,47 @@ export default function App() {
               </ul>
               <button onClick={applySuggestions}>Apply suggestions</button>
             </div>
+          )}
+            </>
+          )}
+
+          {settingsMode === "advanced" && (
+            <>
+              <div className="panel">
+                <h2>Advanced Settings</h2>
+                <p>Edit full JSON for `preferences` and `shortlist_rules`. This exposes all fields.</p>
+                <div className="field">
+                  <label>preferences.json payload</label>
+                  <textarea
+                    className="json-editor"
+                    value={advancedPrefsText}
+                    onChange={(e) => setAdvancedPrefsText(e.target.value)}
+                  />
+                </div>
+                <div className="field">
+                  <label>shortlist_rules.json payload</label>
+                  <textarea
+                    className="json-editor"
+                    value={advancedRulesText}
+                    onChange={(e) => setAdvancedRulesText(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="actions">
+                <button onClick={runAdvancedValidate}>Validate JSON</button>
+                <button className="primary" onClick={saveAdvancedSettings}>Validate and save advanced settings</button>
+                <button
+                  onClick={() => {
+                    setAdvancedPrefsText(JSON.stringify(settings.preferences || {}, null, 2));
+                    setAdvancedRulesText(JSON.stringify(settings.rules || {}, null, 2));
+                    setAdvancedState("Reloaded editor from current saved settings");
+                  }}
+                >
+                  Reload from current settings
+                </button>
+                {(advancedState || saveState) && <span className="status">{advancedState || saveState}</span>}
+              </div>
+            </>
           )}
         </section>
       </SettingsTab>

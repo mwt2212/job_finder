@@ -11,7 +11,6 @@
     "\\bprospecting\\b",
     "\\bquota\\b",
     "\\bdials\\b",
-    "\\buncapped\\b",
     "\\b1099\\b",
     "\\bdraw\\b",
     "door[- ]to[- ]door",
@@ -19,8 +18,7 @@
     "\\bcanvass\\b",
     "\\bappointment setter\\b",
     "\\bcloser\\b",
-    "\\binsurance agent\\b",
-    "\\bfinancial advisor\\b"
+    "\\binsurance agent\\b"
   ],
   "not_entry_level_patterns": [
     "\\bsenior\\b",
@@ -82,5 +80,10 @@
   },
   "sales_adjacent_penalty": -30,
   "healthcare_penalty": -30,
-  "wrong_field_penalty": -16
+  "wrong_field_penalty": -16,
+  "penalties": {
+    "sales_adjacent": -30,
+    "healthcare": -30,
+    "wrong_field": -16
+  }
 }
