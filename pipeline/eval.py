@@ -1,4 +1,5 @@
 import json
+import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, Tuple
@@ -117,6 +118,15 @@ def _extract_usage(resp) -> Dict[str, Any]:
 def _call_model(prompt: str, model: str, schema: dict) -> Tuple[str, Dict[str, Any]]:
     # New SDK (Responses API)
     if client and hasattr(client, "responses"):
+        response_schema = schema
+        if isinstance(schema, dict) and schema.get("type") == "array":
+            # Responses API requires a top-level object schema.
+            response_schema = {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {"items": schema},
+                "required": ["items"],
+            }
         resp = client.responses.create(
             model=model,
             input=prompt,
@@ -124,7 +134,7 @@ def _call_model(prompt: str, model: str, schema: dict) -> Tuple[str, Dict[str, A
                 "format": {
                     "type": "json_schema",
                     "name": "job_eval",
-                    "schema": schema,
+                    "schema": response_schema,
                     "strict": True,
                 }
             },
@@ -194,6 +204,14 @@ def evaluation_prefs_payload(prefs: Dict[str, Any]) -> Dict[str, Any]:
     if isinstance(search_filters, dict):
         search_filters.pop("location_city", None)
     return payload
+
+
+def _safe_console_text(text: str) -> str:
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    try:
+        return str(text).encode(encoding, errors="replace").decode(encoding, errors="replace")
+    except Exception:
+        return str(text)
 
 
 def main():
@@ -312,6 +330,11 @@ Return ONLY a JSON array that matches the schema, in the same order as the jobs 
                 raise
             eval_batch = json.loads(json_block)
 
+        if isinstance(eval_batch, dict):
+            maybe_items = eval_batch.get("items")
+            if isinstance(maybe_items, list):
+                eval_batch = maybe_items
+
         if not isinstance(eval_batch, list) or len(eval_batch) != len(batch):
             raise RuntimeError("Model returned invalid batch length.")
 
@@ -349,12 +372,13 @@ Return ONLY a JSON array that matches the schema, in the same order as the jobs 
 
         OUTFILE.write_text(json.dumps([r for r in results if r], ensure_ascii=False, indent=2), encoding="utf-8")
         for (idx, job, _), eval_result in zip(batch, eval_batch):
-            print(f"[{idx + 1}/{len(jobs)}] {job.get('title','')[:60]} -> {eval_result['fit_score']} ({eval_result['next_action']})")
+            line = f"[{idx + 1}/{len(jobs)}] {job.get('title','')[:60]} -> {eval_result['fit_score']} ({eval_result['next_action']})"
+            print(_safe_console_text(line))
         time.sleep(0.25)
 
     final_results = [r for r in results if r]
     OUTFILE.write_text(json.dumps(final_results, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"\nSaved {len(final_results)} scored jobs -> {OUTFILE}")
+    print(_safe_console_text(f"\nSaved {len(final_results)} scored jobs -> {OUTFILE}"))
 
 
 if __name__ == "__main__":
